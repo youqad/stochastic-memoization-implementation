@@ -96,6 +96,16 @@ instance Environment EnvVal where
   union (Env m1) (Env m2) = Env (m1 ++ m2)
 
 deriving instance Show EnvVal
+instance Eq EnvVal where
+  (Env m1) == (Env m2) = m1 == m2
+instance Ord EnvVal where
+  compare (Env m1) (Env m2) = compare m1 m2
+instance Eq (Exists (IdentVal Value)) where
+  (This (IdentVal (Id (s1, _), _))) == (This (IdentVal (Id (s2, _), _))) = s1 == s2
+instance Ord (Exists (IdentVal Value)) where
+  compare (This (IdentVal (Id (s1, _), _))) (This (IdentVal (Id (s2, _), _))) = compare s1 s2
+
+
 
 typeFromVal :: Value a -> Typey a
 typeFromVal (AtomVal _) = 𝔸
