@@ -3,7 +3,6 @@
 module Values where
 
 import qualified Data.Map as Map
-import qualified Data.Set as Set
 import Data.Type.Equality
 
 import qualified Numeric.Probability.Distribution as Dist

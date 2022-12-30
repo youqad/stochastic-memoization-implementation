@@ -4,7 +4,6 @@ module Main where
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import Data.Type.Equality
 
 import Data.Maybe (fromJust)
 import Control.Monad (forM_, forM, foldM)
