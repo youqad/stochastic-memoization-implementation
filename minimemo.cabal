@@ -6,7 +6,7 @@ cabal-version: 1.12
 
 name:           minimemo
 version:        0.1.0.0
-description:    Please see the README on GitHub at <https://github.com/githubuser/minimemo#readme>
+description:    Please see the README on GitHub at <https://github.com/youqad/stochastic-memoization-implementation>
 homepage:       https://github.com/githubuser/minimemo#readme
 bug-reports:    https://github.com/githubuser/minimemo/issues
 license:        BSD3
@@ -31,7 +31,7 @@ library
       src
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
-      base >=4.7 && <5
+      base >=4.7
     , containers
     , hasktorch
     , mtl
@@ -47,7 +47,7 @@ executable minimemo-exe
       app
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      base >=4.7
     , containers
     , hasktorch
     , minimemo
@@ -65,7 +65,7 @@ test-suite minimemo-test
       test
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      base >=4.7
     , containers
     , hasktorch
     , minimemo
