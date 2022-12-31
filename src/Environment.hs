@@ -7,17 +7,6 @@ import qualified Data.Set as Set
 
 import Syntax
 
--- cf. https://stackoverflow.com/questions/28388715/list-of-any-datakind-in-gadt
---     https://stackoverflow.com/questions/69138268/using-gadts-with-datakinds-for-type-level-data-constructor-constraints-in-functi
-data Exists :: (k -> *) -> * where
-  This :: p x -> Exists p
-
-deriving instance Show (Exists Expr)
-deriving instance Show (Exists Ident)
-
-
--- data SomeExpr
---   where This :: Expr a -> SomeExpr
 
 ------------------------
 -- | ENVIRONMENTS

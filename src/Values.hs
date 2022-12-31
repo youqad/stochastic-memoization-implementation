@@ -4,6 +4,7 @@ module Values where
 
 import qualified Data.Map as Map
 import Data.Type.Equality
+import Data.Function(on)
 
 import qualified Numeric.Probability.Distribution as Dist
 import qualified Control.Monad.State as State
@@ -134,7 +135,3 @@ typeFromExpr (Let _ e) = typeFromExpr e
 typeFromExpr (Sequence _ e) = typeFromExpr e
 typeFromExpr Fresh = 𝔸
 typeFromExpr Flip = 𝔹
-
-
-bernoulli :: Num prob => prob -> Dist.T prob Bool
-bernoulli θ = Dist.choose θ True False

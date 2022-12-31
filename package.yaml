@@ -23,6 +23,8 @@ dependencies:
 - hasktorch
 - probability
 - mtl
+- QuickCheck
+- HUnit
 
 ghc-options:
 - -Wall

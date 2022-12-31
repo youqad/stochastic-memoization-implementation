@@ -13,9 +13,16 @@ import qualified Control.Monad.State as State
 -- import qualified Control.Monad.Trans.State.Strict as State
 -- import Debug.Trace (trace)
 
+import Test.QuickCheck
+-- import System.IO.Unsafe (unsafePerformIO)
+
 import Syntax
 import Environment
 import Values
+
+
+bernoulli :: Num prob => prob -> Dist.T prob Bool
+bernoulli θ = Dist.choose θ True False
 
 ------------------------
 -- | SEMANTICS
@@ -390,22 +397,40 @@ simplify (b, (Mem ((l, r), m), S λ)) =
     Set.toList r,
     Map.toList m)
 
+run :: (Ord a, Show a) => 
+  (e -> EnvVal -> T a)
+  -> e -> String
+run sem e =
+  let T ev = sem e initEnv
+      res = simplify <$> State.runStateT ev (initMem, S Map.empty) in
+  Dist.pretty show res
+
+runSems :: [Expr a -> String]
+runSems = [run den, run bigStepComplete, run smallStepIteratedComplete]
+
+-- QuickCheck to test equivalence of the various semantics
+-- prop_semantics :: Expr a -> Property
+-- prop_semantics e =
+--   forAll (choose (0, 10)) $ \n ->
+--     let res = runSems <*> [e] in
+--     all (== head res) (tail res)
+
+prop_semanticsEquivalent :: Property
+prop_semanticsEquivalent =
+  forAll (resize 4 arbitrary :: Gen (Exists Expr)) $ \(This expr) ->
+      let bigStepResult = run bigStep expr
+          denResult = run den expr
+      in bigStepResult === denResult
+
 main :: IO ()
 main = do
-  let exps = [exp1]--, exp2, exp3, exp4]
-  forM_ exps $ \exp -> do
-    print exp
-    let T ev = den exp initEnv
-    let T ev' = bigStepComplete exp initEnv
-    let T ev'' = smallStepIterate 2 exp initEnv
-    let T ev''' = smallStepIteratedComplete exp initEnv
-    let res = simplify <$> State.runStateT ev (initMem, S Map.empty)
-    let res' = simplify <$> State.runStateT ev' (initMem, S Map.empty)
-    -- let res'' = (\x -> let ((b, _), ls, rs, m) = simplify x in (b, ls, rs, m)) <$> State.runStateT ev'' (initMem, S Map.empty)
-    let res'' = simplify <$> State.runStateT ev'' (initMem, S Map.empty)
-    let res''' = simplify <$> State.runStateT ev''' (initMem, S Map.empty)
-    putStrLn $ Dist.pretty show res
-    putStrLn $ Dist.pretty show res'
-    putStrLn $ Dist.pretty show res'''
-    putStrLn $ Dist.pretty show res''
-    putStrLn "_______________________"
+  -- let exps = [exp1]--, exp2, exp3, exp4]
+  -- exps <- generate (vectorOf 2 (resize 4 arbitrary :: Gen (Exists Expr)))
+  -- forM_ exps $ \(This exp) -> do
+  --   putStrLn "_______________________"
+  --   print exp
+  --   let res = runSems <*> [exp]
+  --   forM_ res putStrLn
+  --   putStrLn $ run (smallStepIterate 2) exp
+  --   putStrLn "_______________________"
+  quickCheck prop_semanticsEquivalent
