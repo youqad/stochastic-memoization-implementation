@@ -451,15 +451,18 @@ approx' (Dist.Cons xs) (Dist.Cons ys) =
 prop_semanticsEquivalent :: Property
 prop_semanticsEquivalent =
   forAll (resize 4 arbitrary :: Gen (Exists Expr)) $ \(This expr) ->
-      let bigStepResult = run bigStep expr
+      let bigStepResult = run bigStepComplete expr
           denResult = run den expr
+          smallStepResult = run smallStepIteratedComplete expr
       in
       -- test that the two semantics agree on the distribution with @approx'@,
       -- and if they don't, display the two distributions
-      counterexample (Dist.pretty show bigStepResult ++ "\n  ≠  \n" ++ Dist.pretty show denResult) $ approx' bigStepResult denResult
+      counterexample (Dist.pretty show bigStepResult ++ "\n  |bigStep| ≠ |denotational| \n\n" ++ Dist.pretty show denResult) (approx' bigStepResult denResult)
+      .&&.
+      counterexample (Dist.pretty show bigStepResult ++ "\n  |bigStep| ≠ |smallStep| \n\n" ++ Dist.pretty show smallStepResult) (approx' bigStepResult smallStepResult)
 
 -- -- expression1: if ((λx_1. Flip) [(λx_2. Fresh) [Flip]]) then (((λx_3. Fresh) [Flip]) == (if (Flip) then (Fresh) else (Fresh))) else (if (Flip) then (Flip) else (Flip))
-expression1 :: Expr _
+expression1 :: Expr 'TBool
 expression1 = 
   If (Apply (Lambda [Id ("x_1", 𝔸)] Flip) [Apply (Lambda [Id ("x_2", 𝔹)] Fresh) [Flip]]) 
     (Apply (Lambda [Id ("x_3", 𝔹)] Fresh) [Flip]

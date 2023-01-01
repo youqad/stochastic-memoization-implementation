@@ -2,7 +2,6 @@
 
 module Syntax where
 
-import Data.Char(isAlpha)
 import qualified Data.List as List
 import Data.Type.Equality
 import Data.Function(on)
