@@ -37,6 +37,7 @@ library
     , containers
     , hasktorch
     , mtl
+    , pretty
     , probability
     , unix
   default-language: Haskell2010
@@ -56,6 +57,7 @@ executable minimemo-exe
     , hasktorch
     , minimemo
     , mtl
+    , pretty
     , probability
     , unix
   default-language: Haskell2010
@@ -76,6 +78,7 @@ test-suite minimemo-test
     , hasktorch
     , minimemo
     , mtl
+    , pretty
     , probability
     , unix
   default-language: Haskell2010

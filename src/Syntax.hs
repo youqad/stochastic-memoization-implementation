@@ -12,6 +12,11 @@ import Unsafe.Coerce (unsafeCoerce)
 
 import Test.QuickCheck
 
+-- import (<>) as PP.(<>) from Text.PrettyPrint
+
+import Text.PrettyPrint
+
+
 ------------------------
 -- | SYNTAX
 ------------------------
@@ -95,11 +100,38 @@ data Expr :: Type -> * where
   Flip :: Expr 'TBool
 
 instance Show (Expr a) where
-  show = prettyPrint
+  show = render . ppExpr
+    where
+    ppExpr :: Expr a -> Doc
+    ppExpr (Atom a) = text $ show a
+    ppExpr (Bool b) = text $ show b
+    ppExpr (If e1 e2 e3) = text "if" <+> parens (ppExpr (unsafeCoerce e1)) <+> text "then" <+> parens (ppExpr e2) <+> text "else" <+> parens (ppExpr e3)
+    ppExpr (Pair e1 e2) = parens (ppExpr (unsafeCoerce e1) Text.PrettyPrint.<> text "," <+> ppExpr (unsafeCoerce e2))
+    ppExpr (Match e (Id (x, _), Id (y, _)) e') = text "Match" <+> ppExpr (unsafeCoerce e) 
+        <+> text "with" 
+        <+> parens (text x Text.PrettyPrint.<> text "," <+> text y) 
+        <+> text "->" 
+        <+> parens (ppExpr e')
+    ppExpr (Variable (Id (x, _))) = text x
+    ppExpr (Lambda [] e) = ppExpr (unsafeCoerce e)
+    ppExpr (Lambda (Id (x, _):xs) e) = parens (text "λ" Text.PrettyPrint.<> text x Text.PrettyPrint.<> text "." <+> ppExpr (Lambda xs e))
+    ppExpr (Apply e1 e2) = ppExpr (unsafeCoerce e1) <+> brackets (hsep (map ppExpr (unsafeCoerce e2)))
+    ppExpr (MemoBernoulli p) = text "memoBernoulli" <+> text (show p)
+    ppExpr (MemoApply e1 e2) = ppExpr (unsafeCoerce e1) <+> text "`memoApply`" <+> parens (ppExpr (unsafeCoerce e2))
+    ppExpr (Eq e1 e2) = parens (ppExpr (unsafeCoerce e1)) <+> text "==" <+> parens (ppExpr (unsafeCoerce e2))
+    ppExpr (Let d e) = text "let" <+> parens (ppDefn (unsafeCoerce d)) <+> text "in" <+> ppExpr e
+    ppExpr (Sequence e1 e2) = ppExpr (unsafeCoerce e1) Text.PrettyPrint.<> semi <+> ppExpr e2
+    ppExpr Fresh = text "Fresh"
+    ppExpr Flip = text "Flip"
+
+    ppDefn :: Defn a -> Doc
+    ppDefn (Val (Id (x, _)) e) = text x <+> text ":=" <+> ppExpr e
+
+    
 instance Eq (Expr a) where
-  (==) = (==) `on` prettyPrint
+  (==) = (==) `on` show
 instance Ord (Expr a) where
-  compare = compare `on` prettyPrint
+  compare = compare `on` show
 
 instance Arbitrary (Exists Expr) where 
   arbitrary :: Gen (Exists Expr)
@@ -111,7 +143,8 @@ instance Arbitrary (Exists Expr) where
       case t of
         Just 𝔹 -> oneof $ listOfPossibilitiesContext ls t n 
           ++ listOfPossibilitiesBase ls t
-          ++ [do
+          ++ [
+            do -- Eq construct
               This t' <- elements [This 𝔸, This 𝔹]
               This this1 <- arbExpr ls (Just t') (n `div` 2)
               This this2 <- arbExpr ls (Just t') (n `div` 2)
@@ -127,21 +160,23 @@ instance Arbitrary (Exists Expr) where
           ++ listOfPossibilitiesBase ls t
         Just (Prod a b) -> oneof $ listOfPossibilitiesContext ls t n
           ++ listOfPossibilitiesBase ls t
-          ++ [do
+          ++ [
+            do
               This this1 <- arbExpr ls (Just a) (n `div` 2)
               This this2 <- arbExpr ls (Just b) (n `div` 2)
               return $ This $ Pair this1 (unsafeCoerce this2)
-          ]
+            ]
         Just (Arr a b) -> oneof $ listOfPossibilitiesContext ls t n
           ++ listOfPossibilitiesBase ls t
           ++ [do
-              let s1 = "x_" ++ show (List.length ls + 1)
-              This this2 <- arbExpr (This (Id (s1, a)):ls) (Just b) (n `div` 2)
-              return $ This $ Lambda [Id (s1, a)] (unsafeCoerce this2)
-          ]
+                let s1 = "x_" ++ show (List.length ls + 1)
+                This this2 <- arbExpr (This (Id (s1, a)):ls) (Just b) (n `div` 2)
+                return $ This $ Lambda [Id (s1, a)] (unsafeCoerce this2)
+              ]
         Nothing -> oneof $ listOfPossibilitiesContext ls t n
           ++ listOfPossibilitiesBase ls t
-          ++ [do
+          ++ [
+            do
               This t' <- elements [This 𝔸, This 𝔹]
               This this1 <- arbExpr ls (Just t') (n `div` 2)
               This this2 <- arbExpr ls (Just t') (n `div` 2)
@@ -159,128 +194,80 @@ instance Arbitrary (Exists Expr) where
               This this2 <- arbExpr ls (Just 𝔸) (n `div` 2)
               return $ This $ Pair this1 (unsafeCoerce this2)
           ]
+    listOfPossibilitiesBase :: [Exists Ident] -> Maybe (Typey a) -> [Gen (Exists Expr)]
     listOfPossibilitiesBase listVariables t = case t of
         Just 𝔹 -> return (This Flip) :
           [return $ This (Variable (Id (s', t'))) | (This (Id (s', t'))) <- listVariables, isJust (testEquality t' 𝔹)]
         Just 𝔸 -> return (This Fresh) :
           [return $ This (Variable (Id (s', t'))) | (This (Id (s', t'))) <- listVariables, isJust (testEquality t' 𝔸)]
-        Just MemFn -> (This . MemoBernoulli <$> choose (0, 1)) :
+        Just MemFn -> (This . MemoBernoulli . round' 3 <$> choose (0, 1)) :
           [return $ This (Variable (Id (s', t'))) | (This (Id (s', t'))) <- listVariables, isJust (testEquality t' MemFn)]
         Just t0 -> 
           let resList = [return $ This (Variable (Id (s', t'))) | (This (Id (s', t'))) <- listVariables, isJust (testEquality t' t0)] in
           case resList of
             [] -> case t0 of
               Prod a b -> [do
-                This this1 <- arbExpr listVariables (Just a) 0
-                This this2 <- arbExpr listVariables (Just b) 0
-                return $ This $ Pair this1 this2
+                  This this1 <- arbExpr listVariables (Just a) 0
+                  This this2 <- arbExpr listVariables (Just b) 0
+                  return $ This $ Pair this1 this2
                 ]
               Arr a b -> [do
-                let s1 = "x_" ++ show (List.length listVariables + 1)
-                This this2 <- arbExpr (This (Id (s1, a)):listVariables) (Just b) 0
-                return $ This $ Lambda [Id (s1, a)] (unsafeCoerce this2)
+                  let s1 = "x_" ++ show (List.length listVariables + 1)
+                  This this2 <- arbExpr (This (Id (s1, a)):listVariables) (Just b) 0
+                  return $ This $ Lambda [Id (s1, a)] (unsafeCoerce this2)
                 ]
             _ -> resList
         Nothing -> [return $ This Fresh, return $ This Flip
-          , This . MemoBernoulli <$> choose (0, 1)]
+          , This . MemoBernoulli . round' 3 <$> choose (0, 1)]
           ++ [return $ This (Variable (Id (s', t'))) | (This (Id (s', t'))) <- listVariables]
+    listOfPossibilitiesContext :: [Exists Ident] -> Maybe (Typey a) -> Int -> [Gen (Exists Expr)]
     listOfPossibilitiesContext ls t n = 
-      [
-        do -- If construct
+      let baseTypes = [This 𝔸, This 𝔹, This MemFn, This (Arr 𝔸 𝔸), This (Arr 𝔸 𝔹), This (Arr 𝔹 𝔸), This (Arr 𝔹 𝔹)] in
+        [ do -- If construct
+            This t1 <- case t of
+              Nothing -> elements baseTypes
+              Just t' -> return $ This t'
             This this0 <- arbExpr ls (Just 𝔹) (n `div` 2)
-            This this1 <- arbExpr ls t (n `div` 2)
-            This this2 <- arbExpr ls t (n `div` 2)
+            This this1 <- arbExpr ls (Just t1) (n `div` 2)
+            This this2 <- arbExpr ls (Just t1) (n `div` 2)
             return $ This $ If (unsafeCoerce this0) this1 (unsafeCoerce this2)
         , do -- Match construct
             let s1 = "x_" ++ show (List.length ls + 1)
             let s2 = "x_" ++ show (List.length ls + 2)
-            This t1 <- elements [This 𝔸, This 𝔹]
-            This t2 <- elements [This 𝔸, This 𝔹]
+            This t1 <- elements baseTypes
+            This t2 <- elements baseTypes
+            let ls' = This (Id (s1, t1)):This (Id (s2, t2)):ls
             This this1 <- arbExpr ls (Just t1) (n `div` 2)
             This this2 <- arbExpr ls (Just t2) (n `div` 2)
-            This this3 <- arbExpr ([This (Id (s1, t1)), This (Id (s2, t2))] ++ ls) t (n `div` 2)
+            This this3 <- arbExpr ls' t (n `div` 2)
             return $ This $ Match (Pair this1 this2) (Id (s1, unsafeCoerce t1), Id (s2, unsafeCoerce t2)) (unsafeCoerce this3)
         , do -- Apply construct
-            This t1 <- elements [This 𝔸, This 𝔹]
-            This t2 <- elements [This 𝔸, This 𝔹]
+            This t1 <- elements baseTypes
+            This t2 <- elements baseTypes
             let t0 = fromMaybe t2 (unsafeCoerce t)
             This this1 <- arbExpr ls (Just (Arr t1 t0)) (n `div` 2)
             This this2 <- arbExpr ls (Just t1) (n `div` 2)
             return $ This $ Apply (unsafeCoerce this1) [this2]
         , do -- Let construct
             let s1 = "x_" ++ show (List.length ls + 1)
-            This t1 <- elements [This 𝔸, This 𝔹]
+            This t1 <- elements baseTypes
+            let ls' = This (Id (s1, t1)) : ls
             This this1 <- arbExpr ls (Just t1) (n `div` 2)
-            This this2 <- arbExpr (This (Id (s1, t1)) : ls) t (n `div` 2)
+            This this2 <- arbExpr ls' t (n `div` 2)
             return $ This $ Let (Val (Id (s1, unsafeCoerce t1)) (unsafeCoerce this1)) (unsafeCoerce this2)
         -- , do -- Sequence construct
-        --     This t1 <- elements [This 𝔸, This 𝔹]
+        --     This t1 <- elements baseTypes
         --     This this1 <- arbExpr ls (Just t1) (n `div` 2)
         --     This this2 <- arbExpr ls t (n `div` 2)
         --     return $ This $ Sequence (unsafeCoerce this1) (unsafeCoerce this2)
         ]
+    round' :: Int -> Double -> Double
+    round' prec num = ((fromIntegral :: Integer -> Double). round 
+        $ num * f) / f
+      where f = 10^prec
 
 data Defn a =
     Val (Ident a) (Expr a)
-
--- pretty-print an expression with ellipses
-prettyPrint :: Expr a -> String
-prettyPrint exp = pp 8 1000 exp ""
-  where
-    pp :: Int -> Int -> Expr a -> ShowS
-    pp _ _ (Atom n) = showString ("<atom " ++ show n ++ ">")
-    pp _ _ (Bool b) = showString (show b)
-    pp _ _ (Variable x) = showName x
-    pp _ 0 _ = showString "..."
-    pp p d (Let def body) =
-      showParen (p < 8)
-        (showString "let " . pp_def d def
-          . showString " in " . pp 8 (d-1) body)
-    pp p d (Match e1 e2 e3) =
-      showParen (p < 8)
-        (showString "match " . pp 8 (d-1) e1 . showString " with "
-          . showString " (" .
-          showName (fst e2) . showString ", " . showName (snd e2) .
-          showString ") in " . pp 8 (d-1) e3)
-    pp p d (Lambda fps body) =
-      showParen (p < 8)
-        (showString "λ (" . pp_list showName fps . showString ") "
-          . pp 8 (d-1) body)
-    pp p _ (MemoBernoulli θ) =
-      showParen (p < 8)
-        (showString "memoBernoulli(" . showString (show θ) . showString ")")
-    pp p d (Sequence e1 e2) =
-      showParen (p < 8)
-        (pp 7 d e1 . showString "; " . pp 7 (d-1) e2)
-    pp p d (If e1 e2 e3) =
-      showParen (p < 7)
-        (showString "if " . pp 7 (d-1) e1 . showString " then "
-          . pp 7 (d-1) e2 . showString " else " . pp 7 (d-1) e3)
-    pp p d (Eq e1 e2) =
-      showParen (p < 4)
-        (pp 3 (d-1) e1 . showString " == " . pp 4 (d-1) e2)
-    pp p d (Pair e1 e2) =
-      showParen (p < 2)
-        (pp 2 d e1 . showString ", " . pp 2 (d-1) e2)
-    pp p d (Apply f aps) =
-      showParen (p < 2)
-        (pp 2 d f . showString "(" . pp_list (pp 8 (d-1)) aps . showString ")")
-    pp p d (MemoApply f aps) =
-      showParen (p < 2)
-        (pp 2 d f . showString "@(" . pp 8 (d-1) aps . showString ")")
-    pp p _ Flip =
-      showParen (p < 2)
-        (showString "flip()")
-    pp p _ Fresh =
-      showParen (p < 2)
-        (showString "fresh()")
-    showName (Id (x, _) :: Ident a) =
-      if isAlpha (head x) then showString x
-      else showString "(" . showString x . showString ")"
-    pp_def :: Int -> Defn a -> ShowS
-    pp_def d (Val x e) =
-      showName x . showString " := " . pp 8 (d-1) e
-    pp_list :: (a -> ShowS) -> [a] -> ShowS
-    pp_list p = foldr (.) id . List.intersperse (showString ", ") . map p
+  deriving (Eq, Show)
 
 

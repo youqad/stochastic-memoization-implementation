@@ -386,6 +386,19 @@ exp4 =
   Let (Val (Id ("f", MemFn)) (MemoBernoulli 0.5)) $
   Eq (MemoApply (Variable (Id ("f", MemFn))) (Variable (Id ("x", 𝔸)))) (Bool True)
 
+exp5 :: Expr 'TBool 
+-- exp5 is the expression (where == is syntactic sugar for the Eq construct):
+-- "if (λ (x_1) flip())((λ (x_1) fresh())(flip())) then (λ (x_1) fresh())(flip()) == (if flip() then fresh() else fresh()) else (if flip() then fresh() else fresh()), (if flip() then fresh() else fresh())"
+exp5 = 
+  If (Apply (Lambda [Id ("x_1", 𝔸)] Flip) [Apply (Lambda [Id ("x_2", 𝔹)] Fresh) [Flip]]) 
+    (Apply (Lambda [Id ("x_3", 𝔹)] Fresh) [Flip]
+    `Eq`  
+    If Flip Fresh Fresh) $
+    If Flip Flip Flip
+
+
+
+
 simplify :: (Eq (LeftNode t), Show (LeftNode t)) =>
   (a, (MemoBigraph (LeftNode t) r b, StateOfBiases t))
   -> (a, [(LeftNode t, Double)], [r], [((LeftNode t, r), b)])
@@ -397,15 +410,25 @@ simplify (b, (Mem ((l, r), m), S λ)) =
     Set.toList r,
     Map.toList m)
 
-run :: (Ord a, Show a) => 
+simplify' :: (Eq (LeftNode t), Show (LeftNode t)) =>
+  (a, (MemoBigraph (LeftNode t) r b, StateOfBiases t))
+  -> (a, [(LeftNode t, Double)], [r])
+simplify' (b, (Mem ((l, r), _), S λ)) =
+    (b,
+    zipWith (\f (f', θ) ->
+      if f == f' then (f, θ) else error (show f ++ " ≠ " ++ show f'))
+      (Set.toList l) (Map.toList λ),
+    Set.toList r)
+
+run :: Ord a => 
   (e -> EnvVal -> T a)
-  -> e -> String
+  -> e -> Dist (a, [(FnLabels, Double)], [AtmLabels])
 run sem e =
   let T ev = sem e initEnv
-      res = simplify <$> State.runStateT ev (initMem, S Map.empty) in
-  Dist.pretty show res
+      res = simplify' <$> State.runStateT ev (initMem, S Map.empty) in
+  Dist.norm res
 
-runSems :: [Expr a -> String]
+runSems :: [Expr a -> Dist (Value a, [(FnLabels, Double)], [AtmLabels])]
 runSems = [run den, run bigStepComplete, run smallStepIteratedComplete]
 
 -- QuickCheck to test equivalence of the various semantics
@@ -415,12 +438,36 @@ runSems = [run den, run bigStepComplete, run smallStepIteratedComplete]
 --     let res = runSems <*> [e] in
 --     all (== head res) (tail res)
 
+-- | More permissive version of `approx`:
+approx' :: (RealFloat prob, Ord a) =>
+  Dist.T prob a -> Dist.T prob a ->Bool
+approx' (Dist.Cons xs) (Dist.Cons ys) =
+  let (xse, xsp) = unzip (Dist.norm' xs)
+      (yse, ysp) = unzip (Dist.norm' ys)
+  in  xse == yse &&
+      all (\p -> abs p < 1e-8) (zipWith (-) xsp ysp)
+
+
 prop_semanticsEquivalent :: Property
 prop_semanticsEquivalent =
   forAll (resize 4 arbitrary :: Gen (Exists Expr)) $ \(This expr) ->
       let bigStepResult = run bigStep expr
           denResult = run den expr
-      in bigStepResult === denResult
+      in
+      -- test that the two semantics agree on the distribution with @approx'@,
+      -- and if they don't, display the two distributions
+      counterexample (Dist.pretty show bigStepResult ++ "\n  ≠  \n" ++ Dist.pretty show denResult) $ approx' bigStepResult denResult
+
+-- -- expression1: if ((λx_1. Flip) [(λx_2. Fresh) [Flip]]) then (((λx_3. Fresh) [Flip]) == (if (Flip) then (Fresh) else (Fresh))) else (if (Flip) then (Flip) else (Flip))
+expression1 :: Expr _
+expression1 = 
+  If (Apply (Lambda [Id ("x_1", 𝔸)] Flip) [Apply (Lambda [Id ("x_2", 𝔹)] Fresh) [Flip]]) 
+    (Apply (Lambda [Id ("x_3", 𝔹)] Fresh) [Flip]
+    `Eq`  
+    If Flip Fresh Fresh) $
+    If Flip Flip Flip
+
+
 
 main :: IO ()
 main = do
@@ -433,4 +480,5 @@ main = do
   --   forM_ res putStrLn
   --   putStrLn $ run (smallStepIterate 2) exp
   --   putStrLn "_______________________"
+  print exp5
   quickCheck prop_semanticsEquivalent

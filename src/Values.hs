@@ -4,7 +4,7 @@ module Values where
 
 import qualified Data.Map as Map
 import Data.Type.Equality
-import Data.Function(on)
+-- import Data.Function(on)
 
 import qualified Numeric.Probability.Distribution as Dist
 import qualified Control.Monad.State as State
@@ -50,14 +50,14 @@ data Value :: Type -> * where
 instance Eq (Value a) where
   (AtomVal a) == (AtomVal b) = a == b
   (BoolVal a) == (BoolVal b) = a == b
-  Function {} == Function {} = False
+  (Function _ e _) == (Function _ e' _) = e == e'
   (MemoFunction a) == (MemoFunction b) = a == b
   (PairVal a b _) == (PairVal c d _) = a == c && b == d
 
 instance Ord (Value a) where
   (AtomVal a) <= (AtomVal b) = a <= b
   (BoolVal a) <= (BoolVal b) = a <= b
-  Function {} <= Function {} = False
+  (Function {}) <= (Function {}) = False
   (MemoFunction a) <= (MemoFunction b) = a <= b
   (PairVal a b _) <= (PairVal c d _) = a <= c && b <= d
 instance Show (Value a) where

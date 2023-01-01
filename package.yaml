@@ -25,6 +25,7 @@ dependencies:
 - mtl
 - QuickCheck
 - HUnit
+- pretty
 
 ghc-options:
 - -Wall
