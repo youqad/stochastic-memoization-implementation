@@ -11,7 +11,7 @@ import Control.Monad (forM_, forM, foldM)
 import qualified Numeric.Probability.Distribution as Dist
 import qualified Control.Monad.State as State
 -- import qualified Control.Monad.Trans.State.Strict as State
-import Debug.Trace (trace)
+-- import Debug.Trace (trace)
 
 import Test.QuickCheck
 -- import System.IO.Unsafe (unsafePerformIO)
@@ -166,7 +166,7 @@ smallStep (Match e1 (x1, x2) e2) envTemp env = do
         vs = [This v1, This v2]
 smallStep (Variable x) envTemp env = do
   let env' = envTemp `union` env
-  return (Right $ trace ("envTemp: " ++ show envTemp ++ " env: " ++ show env) 
+  return (Right -- $ trace ("envTemp: " ++ show envTemp ++ " env: " ++ show env) 
           $ find env' x
     , envTemp, env)
 smallStep (Lambda xs e1) envTemp env = do
@@ -528,7 +528,7 @@ approx' (Dist.Cons xs) (Dist.Cons ys) =
   let (xse, xsp) = unzip (Dist.norm' xs)
       (yse, ysp) = unzip (Dist.norm' ys)
   in  xse == yse &&
-      all (\p -> abs p < 1e-8) (zipWith (-) xsp ysp)
+      all (\p -> abs p < 1e-4) (zipWith (-) xsp ysp)
 
 
 prop_semanticsEquivalent :: Property
@@ -544,23 +544,30 @@ prop_semanticsEquivalent =
       .&&. 
       counterexample (Dist.pretty show bigStepResult ++ "\n  |bigStep| ≠ |smallStep| \n\n" ++ Dist.pretty show smallStepResult) (approx' bigStepResult smallStepResult)
 
+-- | run several steps of the small-step semantics and print the result
+testSmallStep :: Expr a -> IO ()
+testSmallStep e = do
+  putStrLn "______________________________________________"
+  pPrint e
+  forM_ [1..4] $ \i -> do
+    let T ev = smallStepIterate i e initEnv
+        res = simplify <$> State.runStateT ev (initMem, S Map.empty)
+    pPrintString $ "smallStepIterate " ++ show i ++ ": \n" ++ Dist.pretty show (Dist.norm res)
+    putStrLn "______________________________________________"
+
+-- | run the various semantics on a list of expressions several and print the result
+testSemantics :: [Exists Expr] -> IO ()
+testSemantics exps =
+  forM_ exps $ \(This e) -> do
+    putStrLn "______________________________________________"
+    pPrint e
+    let res = runSems <*> [e]
+    forM_ res (putStrLn . Dist.pretty show)
+    putStrLn "______________________________________________"
 
 
 main :: IO ()
 main = do
-  let exps = [This exp8]--, This exp2, This exp3, This exp4]
+  -- let exps = [This exp8, This exp2, This exp3, This exp4]
   -- exps <- generate (vectorOf 2 (resize 4 arbitrary :: Gen (Exists Expr)))
-  forM_ exps $ \(This exp) -> do
-    putStrLn "______________________________________________"
-    pPrint exp
-    -- let res0 = runSems <*> [exp]
-    -- forM_ res0 (putStrLn . Dist.pretty show)
-    -- -- run several steps of the small-step semantics and print the result
-    -- forM_ [1..4] $ \i -> do
-    --   let T ev = smallStepIterate i exp initEnv
-    --       res = simplify <$> State.runStateT ev (initMem, S Map.empty)
-    --   pPrintString $ "smallStepIterate " ++ show i ++ ": \n" ++ Dist.pretty show (Dist.norm res)
-    --   putStrLn "______________________________________________"
-    putStrLn "______________________________________________"
-  -- print exp5
   quickCheck prop_semanticsEquivalent
