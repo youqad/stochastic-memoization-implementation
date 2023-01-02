@@ -4,6 +4,7 @@ module Syntax where
 
 import qualified Data.List as List
 import Data.Type.Equality
+import Data.Kind (Type)
 import Data.Function(on)
 import Data.Maybe ( isJust, fromMaybe ) 
 
@@ -22,7 +23,7 @@ import Text.PrettyPrint
 
 -- cf. https://stackoverflow.com/questions/28388715/list-of-any-datakind-in-gadt
 --     https://stackoverflow.com/questions/69138268/using-gadts-with-datakinds-for-type-level-data-constructor-constraints-in-functi
-data Exists :: (k -> *) -> * where
+data Exists :: (k -> Type) -> Type where
   This :: p x -> Exists p
 
 deriving instance Show (Exists Expr)
@@ -34,17 +35,17 @@ deriving instance Show (Exists Ident)
 newtype AtmLabels = Atm Int deriving (Eq, Show, Ord, Enum)
 newtype FnLabels = Fn Int deriving (Eq, Show, Ord, Enum)
 
-data Type =
+data TType =
   TBool
   | TAtom
   | TMemoFun
-  | TProduct Type Type
-  | TArrow [Type] Type
+  | TProduct TType TType
+  | TArrow [TType] TType
   deriving (Show, Eq, Ord)
 
 -- trick to implement dependent types using a singleton GADT, 
 -- cf. https://homepages.inf.ed.ac.uk/slindley/papers/hasochism.pdf 
-data Typey :: Type -> * where
+data Typey :: TType -> Type where
   𝔹 :: Typey 'TBool
   𝔸 :: Typey 'TAtom
   MemFn :: Typey 'TMemoFun
@@ -69,19 +70,19 @@ instance TestEquality Typey where
     return Refl
   testEquality _ _ = Nothing
 
--- data TypedName :: * -> Type -> * where
+-- data TypedName :: Type -> TType -> Type where
 --   TypedName :: a -> TypedName a b
 
-data Ident :: Type -> * where
+data Ident :: TType -> Type where
   Id :: (String, Typey a) -> Ident a
--- data Ident :: Type -> * where 
+-- data Ident :: TType -> Type where 
 --   Id :: String -> Ident a
 
 instance Show (Ident a) where
   show (Id (x, _)) = x
 deriving instance Eq (Ident a)
 
-data Expr :: Type -> * where
+data Expr :: TType -> Type where
   Atom :: AtmLabels -> Expr 'TAtom
   Bool :: Bool -> Expr 'TBool
   If :: Expr 'TBool -> Expr a -> Expr a -> Expr a
@@ -104,7 +105,7 @@ instance Show (Expr a) where
     ppExpr :: Expr a -> Doc
     ppExpr (Atom a) = text $ show a
     ppExpr (Bool b) = text $ show b
-    ppExpr (If e1 e2 e3) = text "if" <+> parens (ppExpr (unsafeCoerce e1)) <+> text "then" <+> parens (ppExpr e2) <+> text "else" <+> parens (ppExpr e3)
+    ppExpr (If e1 e2 e3) = text "If" <+> parens (ppExpr (unsafeCoerce e1)) <+> text "then" <+> parens (ppExpr e2) <+> text "else" <+> parens (ppExpr e3)
     ppExpr (Pair e1 e2) = parens (ppExpr (unsafeCoerce e1) Text.PrettyPrint.<> text "," <+> ppExpr (unsafeCoerce e2))
     ppExpr (Match e (Id (x, _), Id (y, _)) e') = text "Match" <+> ppExpr (unsafeCoerce e) 
         <+> text "with" 
@@ -115,10 +116,10 @@ instance Show (Expr a) where
     ppExpr (Lambda [] e) = ppExpr (unsafeCoerce e)
     ppExpr (Lambda (Id (x, _):xs) e) = parens (text "λ" Text.PrettyPrint.<> text x Text.PrettyPrint.<> text "." <+> ppExpr (Lambda xs e))
     ppExpr (Apply e1 e2) = ppExpr (unsafeCoerce e1) <+> brackets (hsep (map ppExpr (unsafeCoerce e2)))
-    ppExpr (MemoBernoulli p) = text "memoBernoulli" <+> text (show p)
-    ppExpr (MemoApply e1 e2) = ppExpr (unsafeCoerce e1) <+> text "`memoApply`" <+> parens (ppExpr (unsafeCoerce e2))
+    ppExpr (MemoBernoulli p) = text "MemoBernoulli" <+> text (show p)
+    ppExpr (MemoApply e1 e2) = ppExpr (unsafeCoerce e1) <+> text "`MemoApply`" <+> parens (ppExpr (unsafeCoerce e2))
     ppExpr (Eq e1 e2) = parens (ppExpr (unsafeCoerce e1)) <+> text "==" <+> parens (ppExpr (unsafeCoerce e2))
-    ppExpr (Let d e) = text "let" <+> parens (ppDefn (unsafeCoerce d)) <+> text "in" <+> ppExpr e
+    ppExpr (Let d e) = text "Let" <+> parens (ppDefn (unsafeCoerce d)) <+> text "in" <+> ppExpr e
     ppExpr (Sequence e1 e2) = ppExpr (unsafeCoerce e1) Text.PrettyPrint.<> semi <+> ppExpr e2
     ppExpr Fresh = text "Fresh"
     ppExpr Flip = text "Flip"

@@ -5,6 +5,7 @@ module Values where
 import qualified Data.Map as Map
 import qualified Data.List as List
 
+import Data.Kind (Type)
 import Data.Type.Equality
 -- import Data.Function(on)
 
@@ -39,7 +40,7 @@ type T = 𝕋 (MemDen, StateOfBiases MemDen)
 -- | VALUES
 ------------------------
 
-data Value :: Type -> * where
+data Value :: TType -> Type where
   AtomVal :: AtmLabels -> Value 'TAtom
   BoolVal :: Bool -> Value 'TBool
   Function :: (Value a -> T (Value b)) 

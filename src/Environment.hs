@@ -5,6 +5,8 @@ module Environment where
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 
+import Data.Kind (Type)
+
 import Syntax
 
 
@@ -14,7 +16,7 @@ import Syntax
 
 
 class Environment env where
-  type Val env :: Type -> *
+  type Val env :: TType -> Type
   emptyEnv :: env
   find :: env -> Ident a -> (Val env) a
   maybeFind :: env -> Ident a -> Maybe ((Val env) a)

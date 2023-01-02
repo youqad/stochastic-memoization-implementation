@@ -282,7 +282,7 @@ valueToExpr (PairVal a b _) = (Pair <$> valueToExpr a) <*> valueToExpr b
 -- | Transitive closure of small step semantics
 
 smallStepIterate :: Int -> Expr a -> EnvVal -> T (ExprOrValue a, EnvVal)
-smallStepIterate n expr = smallStepIterate' n expr (makeEnv [])
+smallStepIterate n expr = smallStepIterate' n expr (makeEnv []) 
   where 
     smallStepIterate' 0 e envTemp env = do 
       e' <- subst e envTemp
@@ -459,6 +459,24 @@ exp7 =
   Let (Val (Id ("x_1", Arr 𝔸 𝔸)) (Lambda [Id ("x_1", 𝔸)] (Variable (Id ("x_1", 𝔸))))) 
   (Apply (Lambda [Id ("x_2", Arr 𝔸 𝔸)] Fresh) [Lambda [Id ("x_1", 𝔸)] Fresh])
 
+-- exp8: Match (Match ((Fresh) == (Fresh), let (x_1 := (λx_1. x_1)) in Fresh) with (x_1, x_2) -> (let (x_3 := (λx_3. Fresh)) in memoBernoulli 0.403), Match (if (Flip) then ((λx_1. Fresh)) else ((λx_1. Fresh)), let (x_1 := (λx_1. x_1)) in Flip) with (x_1, x_2) -> (if (x_2) then (memoBernoulli 0.795) else (memoBernoulli 0.826))) with (x_1, x_2) -> (Fresh)
+exp8 :: Expr 'TAtom
+exp8 = 
+  Match (
+    Pair
+    (Match
+      (Pair (Fresh `Eq` Fresh) (Let (Val (Id ("x_1", Arr 𝔹 𝔹)) (Lambda [Id ("x_1", 𝔹)] (Variable (Id ("x_1", 𝔹))))) Fresh)) 
+      (Id ("x_1", 𝔹), Id ("x_2", 𝔸))
+      (Let (Val (Id ("x_3", Arr 𝔹 𝔸)) (Lambda [Id ("x_3", 𝔹)] Fresh)) (MemoBernoulli 0.403)))
+    (Match 
+      (Pair
+      (If Flip (Lambda [Id ("x_1", 𝔸)] Fresh) (Lambda [Id ("x_1", 𝔸)] Fresh))
+      (Let (Val (Id ("x_1", Arr 𝔹 𝔹)) (Lambda [Id ("x_1", 𝔹)] (Variable (Id ("x_1", 𝔹))))) Flip))
+      (Id ("x_1", Arr 𝔸 𝔸), Id ("x_2", 𝔹))
+      (If (Variable (Id ("x_2", 𝔹))) (MemoBernoulli 0.795) (MemoBernoulli 0.826)))
+  )
+  (Id ("x_1", MemFn), Id ("x_2", MemFn)) 
+  Fresh
 
 simplify :: (Eq (LeftNode t), Show (LeftNode t)) =>
   (a, (MemoBigraph (LeftNode t) r b, StateOfBiases t))
@@ -526,14 +544,16 @@ prop_semanticsEquivalent =
 
 main :: IO ()
 main = do
-  -- let exps = [exp1]--, exp2, exp3, exp4]
+  let exps = [This exp8]--, This exp2, This exp3, This exp4]
   -- exps <- generate (vectorOf 2 (resize 4 arbitrary :: Gen (Exists Expr)))
-  -- forM_ exps $ \(This exp) -> do
-  --   putStrLn "_______________________"
-  --   print exp
-  --   let res = runSems <*> [exp]
-  --   forM_ res putStrLn
-  --   putStrLn $ run (smallStepIterate 2) exp
-  --   putStrLn "_______________________"
-  print exp5
-  quickCheck prop_semanticsEquivalent
+  forM_ exps $ \(This exp) -> do
+    putStrLn "_______________________"
+    print exp
+    let res = runSems <*> [exp]
+    forM_ res (putStrLn . Dist.pretty show)
+    let T ev = smallStepIterate 2 exp initEnv
+        res' = simplify' <$> State.runStateT ev (initMem, S Map.empty)
+    putStrLn $ "smallStepIterate 2: \n" ++ Dist.pretty show (Dist.norm res')
+    putStrLn "_______________________"
+  -- print exp5
+  -- quickCheck prop_semanticsEquivalent
