@@ -24,7 +24,6 @@ dependencies:
 - probability
 - mtl
 - QuickCheck
-- HUnit
 - pretty
 - pretty-simple
 
@@ -64,3 +63,4 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - minimemo
+    - hspec

@@ -23,6 +23,7 @@ source-repository head
 library
   exposed-modules:
       Environment
+      Semantics
       Syntax
       Values
   other-modules:
@@ -31,8 +32,7 @@ library
       src
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
-      HUnit
-    , QuickCheck
+      QuickCheck
     , base >=4.7
     , containers
     , hasktorch
@@ -51,8 +51,7 @@ executable minimemo-exe
       app
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      HUnit
-    , QuickCheck
+      QuickCheck
     , base >=4.7
     , containers
     , hasktorch
@@ -68,16 +67,17 @@ test-suite minimemo-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      SemanticsSpec
       Paths_minimemo
   hs-source-dirs:
       test
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      HUnit
-    , QuickCheck
+      QuickCheck
     , base >=4.7
     , containers
     , hasktorch
+    , hspec
     , minimemo
     , mtl
     , pretty

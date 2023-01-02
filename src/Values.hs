@@ -110,7 +110,8 @@ instance Eq (Exists (IdentVal Value)) where
 instance Ord (Exists (IdentVal Value)) where
   compare (This (IdentVal (Id (s1, _), _))) (This (IdentVal (Id (s2, _), _))) = compare s1 s2
 
-
+initEnv :: EnvVal
+initEnv = makeEnv []
 
 typeFromVal :: Value a -> Typey a
 typeFromVal (AtomVal _) = 𝔸
