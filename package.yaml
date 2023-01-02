@@ -26,6 +26,7 @@ dependencies:
 - QuickCheck
 - HUnit
 - pretty
+- pretty-simple
 
 ghc-options:
 - -Wall

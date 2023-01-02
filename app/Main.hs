@@ -11,10 +11,12 @@ import Control.Monad (forM_, forM, foldM)
 import qualified Numeric.Probability.Distribution as Dist
 import qualified Control.Monad.State as State
 -- import qualified Control.Monad.Trans.State.Strict as State
--- import Debug.Trace (trace)
+import Debug.Trace (trace)
 
 import Test.QuickCheck
 -- import System.IO.Unsafe (unsafePerformIO)
+
+import Text.Pretty.Simple (pPrint, pPrintString)
 
 import Syntax
 import Environment
@@ -147,7 +149,7 @@ smallStep (Pair e1 e2) envTemp env = do
           case e1 of
             Variable x -> return (Left $ Pair (Variable x) e2'', envTemp'', env'')
             _ -> do
-              let varName = "x_" ++ show (Environment.length envTemp'' 
+              let varName = "xTemp_" ++ show (Environment.length envTemp'' 
                           + Environment.length env'' + 1)
                   ident = Id (varName, typeFromVal v1)
                   envTemp''' = define envTemp'' ident v1
@@ -164,7 +166,9 @@ smallStep (Match e1 (x1, x2) e2) envTemp env = do
         vs = [This v1, This v2]
 smallStep (Variable x) envTemp env = do
   let env' = envTemp `union` env
-  return (Right $ find env' x, envTemp, env)
+  return (Right $ trace ("envTemp: " ++ show envTemp ++ " env: " ++ show env) 
+          $ find env' x
+    , envTemp, env)
 smallStep (Lambda xs e1) envTemp env = do
   let env' = envTemp `union` env
   return (Right $ Function
@@ -183,7 +187,7 @@ smallStep (Apply f es) envTemp env = do
             Variable x -> 
               return (Left $ Apply (Variable x) (e':tail es), envTemp'', env'')
             _ -> do
-              let varName = "f_" ++ show (Environment.length envTemp'' 
+              let varName = "fTemp_" ++ show (Environment.length envTemp'' 
                           + Environment.length env'' + 1)
                   ident = Id (varName, typeFromVal fv)
                   envTemp''' = define envTemp'' ident fv
@@ -206,7 +210,7 @@ smallStep (MemoApply f e) envTemp env = do
             Variable x -> 
               return (Left $ MemoApply (Variable x) e'', envTemp'', env'')
             _ -> do
-              let varName = "fMemo_" ++ show (Environment.length envTemp'' 
+              let varName = "fMemoTemp_" ++ show (Environment.length envTemp'' 
                           + Environment.length env'' + 1)
                   ident = Id (varName, typeFromVal fv)
                   envTemp''' = define envTemp'' ident fv
@@ -242,7 +246,7 @@ smallStep (Eq e1 e2) envTemp env = do
             Variable x -> 
               return (Left $ Eq (Variable x) e2'', envTemp'', env'')
             _ -> do
-              let varName = "e_" ++ show (Environment.length envTemp'' 
+              let varName = "eTemp_" ++ show (Environment.length envTemp'' 
                           + Environment.length env'' + 1)
                   ident = Id (varName, typeFromVal v1)
                   envTemp''' = define envTemp'' ident v1
@@ -547,13 +551,16 @@ main = do
   let exps = [This exp8]--, This exp2, This exp3, This exp4]
   -- exps <- generate (vectorOf 2 (resize 4 arbitrary :: Gen (Exists Expr)))
   forM_ exps $ \(This exp) -> do
-    putStrLn "_______________________"
-    print exp
-    let res = runSems <*> [exp]
-    forM_ res (putStrLn . Dist.pretty show)
-    let T ev = smallStepIterate 2 exp initEnv
-        res' = simplify' <$> State.runStateT ev (initMem, S Map.empty)
-    putStrLn $ "smallStepIterate 2: \n" ++ Dist.pretty show (Dist.norm res')
-    putStrLn "_______________________"
+    putStrLn "______________________________________________"
+    pPrint exp
+    -- let res0 = runSems <*> [exp]
+    -- forM_ res0 (putStrLn . Dist.pretty show)
+    -- -- run several steps of the small-step semantics and print the result
+    -- forM_ [1..4] $ \i -> do
+    --   let T ev = smallStepIterate i exp initEnv
+    --       res = simplify <$> State.runStateT ev (initMem, S Map.empty)
+    --   pPrintString $ "smallStepIterate " ++ show i ++ ": \n" ++ Dist.pretty show (Dist.norm res)
+    --   putStrLn "______________________________________________"
+    putStrLn "______________________________________________"
   -- print exp5
-  -- quickCheck prop_semanticsEquivalent
+  quickCheck prop_semanticsEquivalent
