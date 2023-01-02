@@ -3,6 +3,8 @@
 module Values where
 
 import qualified Data.Map as Map
+import qualified Data.List as List
+
 import Data.Type.Equality
 -- import Data.Function(on)
 
@@ -95,6 +97,7 @@ instance Environment EnvVal where
   makeEnv defs = Env (map (This . IdentVal) defs)
   -- names (Env m) = Map.keys m
   union (Env m1) (Env m2) = Env (m1 ++ m2)
+  length (Env m) = List.length m
 
 deriving instance Show EnvVal
 instance Eq EnvVal where

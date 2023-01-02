@@ -125,109 +125,149 @@ bigStepComplete e env = do
 
 type ExprOrValue a = Either (Expr a) (Value a)
 
-smallStep :: Expr a -> EnvVal -> T (ExprOrValue a, EnvVal)
-smallStep (Atom a) env = return (Right $ AtomVal a, env)
-smallStep (Bool b) env = return (Right $ BoolVal b, env)
-smallStep (If e1 e2 e3) env = do
-  (e1', env') <- smallStep e1 env
+-- smallStep with a an extra environment for temporary variables 
+-- (to store values that need to be remembered while evaluating the expression)
+smallStep :: Expr a -> EnvVal -> EnvVal -> T (ExprOrValue a, EnvVal, EnvVal)
+smallStep (Atom a) envTemp env = return (Right $ AtomVal a, envTemp, env)
+smallStep (Bool b) envTemp env = return (Right $ BoolVal b, envTemp, env)
+smallStep (If e1 e2 e3) envTemp env = do
+  (e1', envTemp', env') <- smallStep e1 envTemp env
   case e1' of
-    Left e1'' -> return (Left $ If e1'' e2 e3, env')
-    Right (BoolVal True) -> return (Left e2, env')
-    Right (BoolVal False) -> return (Left e3, env')
-smallStep (Pair e1 e2) env = do
-  (e1', env') <- smallStep e1 env
+    Left e1'' -> return (Left $ If e1'' e2 e3, envTemp', env')
+    Right (BoolVal True) -> return (Left e2, envTemp', env')
+    Right (BoolVal False) -> return (Left e3, envTemp', env')
+smallStep (Pair e1 e2) envTemp env = do
+  (e1', envTemp', env') <- smallStep e1 envTemp env
   case e1' of
-    Left e1'' -> return (Left $ Pair e1'' e2, env')
+    Left e1'' -> return (Left $ Pair e1'' e2, envTemp', env')
     Right v1 -> do
-      (e2', env'') <- smallStep e2 env
+      (e2', envTemp'', env'') <- smallStep e2 envTemp' env'
       case e2' of
-        Left e2'' -> return (Left $ Pair e1 e2'', env'')
+        Left e2'' -> do
+          case e1 of
+            Variable x -> return (Left $ Pair (Variable x) e2'', envTemp'', env'')
+            _ -> do
+              let varName = "x_" ++ show (Environment.length envTemp'' 
+                          + Environment.length env'' + 1)
+                  ident = Id (varName, typeFromVal v1)
+                  envTemp''' = define envTemp'' ident v1
+              return (Left $ Pair (Variable ident) e2'', envTemp''', env'')
         Right v2 -> return (Right $ PairVal v1 v2 $
-          Prod (typeFromVal v1) (typeFromVal v2), env'')
-smallStep (Match e1 (x1, x2) e2) env = do
-  (e1', env') <- smallStep e1 env
+          Prod (typeFromVal v1) (typeFromVal v2), envTemp'', env'')
+smallStep (Match e1 (x1, x2) e2) envTemp env = do
+  (e1', envTemp', env') <- smallStep e1 envTemp env
   case e1' of
-    Left e1'' -> return (Left $ Match e1'' (x1, x2) e2, env')
-    Right (PairVal v1 v2 _) -> return (Left e2, defArgs env ids vs)
+    Left e1'' -> return (Left $ Match e1'' (x1, x2) e2, envTemp', env')
+    Right (PairVal v1 v2 _) -> return (Left e2, envTemp', defArgs env' ids vs)
       where
         ids = [This x1, This x2]
         vs = [This v1, This v2]
-smallStep (Variable x) env = return (Right $ find env x, env)
-smallStep (Lambda xs e1) env = do
+smallStep (Variable x) envTemp env = do
+  let env' = envTemp `union` env
+  return (Right $ find env' x, envTemp, env)
+smallStep (Lambda xs e1) envTemp env = do
+  let env' = envTemp `union` env
   return (Right $ Function
-      (\arg -> bigStep e1 $ defArgs env (map This xs) [This arg])
+      (\arg -> bigStep e1 $ defArgs env' (map This xs) [This arg])
       (Lambda xs e1)
-      $ typeFromExpr (Lambda xs e1), env)
-smallStep (Apply f es) env = do
-  (f', env') <- smallStep f env
+      $ typeFromExpr (Lambda xs e1), envTemp, env)
+smallStep (Apply f es) envTemp env = do
+  (f', envTemp', env') <- smallStep f envTemp env
   case f' of
-    Left f'' -> return (Left $ Apply f'' es, env')
-    Right (Function f'' _ _) -> do
-      es' <- forM es $ \e -> smallStep e env
+    Left f'' -> return (Left $ Apply f'' es, envTemp', env')
+    Right fv@(Function f'' _ _) -> do
+      es' <- forM es $ \e -> smallStep e envTemp' env'
       case head es' of
-        (Left e', env'') -> return (Left $ Apply f [e'], env'')
-        (Right v, env'') -> do
+        (Left e', envTemp'', env'') -> 
+          case f of
+            Variable x -> 
+              return (Left $ Apply (Variable x) (e':tail es), envTemp'', env'')
+            _ -> do
+              let varName = "f_" ++ show (Environment.length envTemp'' 
+                          + Environment.length env'' + 1)
+                  ident = Id (varName, typeFromVal fv)
+                  envTemp''' = define envTemp'' ident fv
+              return (Left $ Apply (Variable ident) (e':tail es), envTemp''', env'')
+        (Right v, envTemp'', env'') -> do
           v' <- f'' v
-          return (Right v', env'')
-smallStep (MemoBernoulli θ) env = do
+          return (Right v', envTemp'', env'')
+smallStep (MemoBernoulli θ) envTemp env = do
   f <- freshFnOpSem θ
-  return (Right $ MemoFunction f, env)
-smallStep (MemoApply f e) env = do
-  (f', env') <- smallStep f env
+  return (Right $ MemoFunction f, envTemp, env)
+smallStep (MemoApply f e) envTemp env = do
+  (f', envTemp', env') <- smallStep f envTemp env
   case f' of
-    Left f'' -> return (Left $ MemoApply f'' e, env')
-    Right (MemoFunction f'') -> do
-      (e', env'') <- smallStep e env
+    Left f'' -> return (Left $ MemoApply f'' e, envTemp', env')
+    Right fv@(MemoFunction f'') -> do
+      (e', envTemp'', env'') <- smallStep e envTemp' env'
       case e' of
-        Left e'' -> return (Left $ MemoApply f e'', env'')
+        Left e'' -> do
+          case f of
+            Variable x -> 
+              return (Left $ MemoApply (Variable x) e'', envTemp'', env'')
+            _ -> do
+              let varName = "fMemo_" ++ show (Environment.length envTemp'' 
+                          + Environment.length env'' + 1)
+                  ident = Id (varName, typeFromVal fv)
+                  envTemp''' = define envTemp'' ident fv
+              return (Left $ MemoApply (Variable ident) e'', envTemp''', env'')
         Right (AtomVal a) -> do
           b <- getOpSem (f'', a)
-          return (Right $ BoolVal b, env'')
-smallStep (Let (Val x e) e1) env = do
-  (e', env') <- smallStep e env
+          return (Right $ BoolVal b, envTemp'', env'')
+smallStep (Let (Val x e) e1) envTemp env = do
+  (e', envTemp', env') <- smallStep e envTemp env
   case e' of
-    Left e'' -> return (Left $ Let (Val x e'') e1, env')
-    Right v -> return (Left e1, define env' x v)
-smallStep (Sequence e1 e2) env = do
-  (e1', env') <- smallStep e1 env
+    Left e'' -> return (Left $ Let (Val x e'') e1, envTemp', env')
+    Right v -> return (Left e1, envTemp', define env' x v)
+smallStep (Sequence e1 e2) envTemp env = do
+  (e1', envTemp', env') <- smallStep e1 envTemp env
   case e1' of
-    Left e1'' -> return (Left $ Sequence e1'' e2, env')
-    Right _ -> return (Left e2, env')
-smallStep Fresh env = do
+    Left e1'' -> return (Left $ Sequence e1'' e2, envTemp', env')
+    Right _ -> return (Left e2, envTemp', env')
+smallStep Fresh envTemp env = do
   a <- freshAtmOpSem
-  return (Right $ AtomVal a, env)
-smallStep Flip env = T $ State.lift $ do
+  return (Right $ AtomVal a, envTemp, env)
+smallStep Flip envTemp env = T $ State.lift $ do
   b <- bernoulli 0.5
-  return (Right $ BoolVal b, env)
-smallStep (Eq e1 e2) env = do
-  (e1', env') <- smallStep e1 env
+  return (Right $ BoolVal b, envTemp, env)
+smallStep (Eq e1 e2) envTemp env = do
+  (e1', envTemp', env') <- smallStep e1 envTemp env
   case e1' of
-    Left e1'' -> return (Left $ Eq e1'' e2, env')
+    Left e1'' -> return (Left $ Eq e1'' e2, envTemp', env')
     Right v1 -> do
-      (e2', env'') <- smallStep e2 env
+      (e2', envTemp'', env'') <- smallStep e2 envTemp' env'
       case e2' of
-        Left e2'' -> return (Left $ Eq e1 e2'', env'')
-        Right v2 -> return (Right $ BoolVal $ v1 == v2, env'')
+        Left e2'' -> do
+          case e1 of
+            Variable x -> 
+              return (Left $ Eq (Variable x) e2'', envTemp'', env'')
+            _ -> do
+              let varName = "e_" ++ show (Environment.length envTemp'' 
+                          + Environment.length env'' + 1)
+                  ident = Id (varName, typeFromVal v1)
+                  envTemp''' = define envTemp'' ident v1
+              return (Left $ Eq (Variable ident) e2'', envTemp''', env'')
+        Right v2 -> return (Right $ BoolVal $ v1 == v2, envTemp'', env'')
 
--- subst :: Expr a -> [Exists (IdentVal Value)] -> T (Expr a)
--- subst (Atom a) _ = return $ Atom a
--- subst (Bool b) _ = return $ Bool b
--- subst (If e1 e2 e3) env = If <$> subst e1 env <*> subst e2 env <*> subst e3 env
--- subst (Pair e1 e2) env = Pair <$> subst e1 env <*> subst e2 env
--- subst (Match e1 (x1, x2) e2) env =
---   Match <$> subst e1 env <*> pure (x1, x2) <*> subst e2 env
--- subst (Variable x) env = case maybeFind (Env env) x of
---   Nothing -> return $ Variable x
---   Just v -> valueToExpr v
--- subst (Lambda xs e1) env = Lambda xs <$> subst e1 env
--- subst (Apply f es) env = Apply <$> subst f env <*> mapM (subst <*> pure env) es
--- subst (MemoBernoulli θ) _ = return $ MemoBernoulli θ
--- subst (MemoApply f e) env = MemoApply <$> subst f env <*> subst e env
--- subst (Let (Val x e) e1) env = Let <$> (Val x <$> subst e env) <*> subst e1 env
--- subst (Sequence e1 e2) env = Sequence <$> subst e1 env <*> subst e2 env
--- subst Fresh _ = return Fresh
--- subst Flip _ = return Flip
--- subst (Eq e1 e2) env = Eq <$> subst e1 env <*> subst e2 env
+subst :: Expr a -> EnvVal -> T (Expr a)
+subst (Atom a) _ = return $ Atom a
+subst (Bool b) _ = return $ Bool b
+subst (If e1 e2 e3) env = If <$> subst e1 env <*> subst e2 env <*> subst e3 env
+subst (Pair e1 e2) env = Pair <$> subst e1 env <*> subst e2 env
+subst (Match e1 (x1, x2) e2) env =
+  Match <$> subst e1 env <*> pure (x1, x2) <*> subst e2 env
+subst (Variable x) env = case maybeFind env x of
+  Nothing -> return $ Variable x
+  Just v -> valueToExpr v
+subst (Lambda xs e1) env = Lambda xs <$> subst e1 env
+subst (Apply f es) env = Apply <$> subst f env <*> mapM (subst <*> pure env) es
+subst (MemoBernoulli θ) _ = return $ MemoBernoulli θ
+subst (MemoApply f e) env = MemoApply <$> subst f env <*> subst e env
+subst (Let (Val x e) e1) env = Let <$> (Val x <$> subst e env) <*> subst e1 env
+subst (Sequence e1 e2) env = Sequence <$> subst e1 env <*> subst e2 env
+subst Fresh _ = return Fresh
+subst Flip _ = return Flip
+subst (Eq e1 e2) env = Eq <$> subst e1 env <*> subst e2 env
 
 
 valueToExpr :: Value a -> T (Expr a)
@@ -242,20 +282,26 @@ valueToExpr (PairVal a b _) = (Pair <$> valueToExpr a) <*> valueToExpr b
 -- | Transitive closure of small step semantics
 
 smallStepIterate :: Int -> Expr a -> EnvVal -> T (ExprOrValue a, EnvVal)
-smallStepIterate 0 e env = return (Left e, env)
-smallStepIterate n e env = do
-  (e', env') <- smallStep e env
-  case e' of
-    Left e'' -> smallStepIterate (n - 1) e'' env'
-    Right v -> return (Right v, env')
+smallStepIterate n expr = smallStepIterate' n expr (makeEnv [])
+  where 
+    smallStepIterate' 0 e envTemp env = do 
+      e' <- subst e envTemp
+      return (Left e', env)
+    smallStepIterate' m e envTemp env = do
+      (e', envTemp', env') <- smallStep e envTemp env
+      case e' of
+        Left e'' -> smallStepIterate' (m - 1) e'' envTemp' env'
+        Right v -> return (Right v, env')
 
 
 smallStepIterated :: Expr a -> EnvVal -> T (Value a)
-smallStepIterated e env = do
-  (e', env') <- smallStep e env
-  case e' of
-    Left e'' -> smallStepIterated e'' env'
-    Right v -> return v
+smallStepIterated expr = smallStepIterated' expr (makeEnv [])
+  where 
+    smallStepIterated' e envTemp env = do
+      (e', envTemp', env') <- smallStep e envTemp env
+      case e' of
+        Left e'' -> smallStepIterated' e'' envTemp' env'
+        Right v -> return v
 
 smallStepIteratedComplete :: Expr a -> EnvVal -> T (Value a)
 smallStepIteratedComplete e env = do
@@ -396,7 +442,22 @@ exp5 =
     If Flip Fresh Fresh) $
     If Flip Flip Flip
 
+-- exp6: if ((λx_1. Flip) [(λx_2. Fresh) [Flip]]) then (((λx_3. Fresh) [Flip]) == (if (Flip) then (Fresh) else (Fresh))) else (if (Flip) then (Flip) else (Flip))
+exp6 :: Expr 'TBool
+exp6 = 
+  If (Apply (Lambda [Id ("x_1", 𝔸)] Flip) [Apply (Lambda [Id ("x_2", 𝔹)] Fresh) [Flip]]) 
+    (Apply (Lambda [Id ("x_3", 𝔹)] Fresh) [Flip]
+    `Eq`  
+    If Flip Fresh Fresh) $
+    If Flip Flip Flip
 
+-- exp7: ((λx_1. Fresh) [memoBernoulli 0.166 `memoApply` (Fresh)]) == (let (x_1 := (λx_1. x_1)) in (λx_2. Fresh) [(λx_1. Flip)])
+exp7 :: Expr 'TBool
+exp7 = 
+  Apply (Lambda [Id ("x_1", 𝔹)] Fresh) [MemoBernoulli 0.166 `MemoApply` Fresh]
+  `Eq`
+  Let (Val (Id ("x_1", Arr 𝔸 𝔸)) (Lambda [Id ("x_1", 𝔸)] (Variable (Id ("x_1", 𝔸))))) 
+  (Apply (Lambda [Id ("x_2", Arr 𝔸 𝔸)] Fresh) [Lambda [Id ("x_1", 𝔸)] Fresh])
 
 
 simplify :: (Eq (LeftNode t), Show (LeftNode t)) =>
@@ -458,17 +519,8 @@ prop_semanticsEquivalent =
       -- test that the two semantics agree on the distribution with @approx'@,
       -- and if they don't, display the two distributions
       counterexample (Dist.pretty show bigStepResult ++ "\n  |bigStep| ≠ |denotational| \n\n" ++ Dist.pretty show denResult) (approx' bigStepResult denResult)
-      .&&.
+      .&&. 
       counterexample (Dist.pretty show bigStepResult ++ "\n  |bigStep| ≠ |smallStep| \n\n" ++ Dist.pretty show smallStepResult) (approx' bigStepResult smallStepResult)
-
--- -- expression1: if ((λx_1. Flip) [(λx_2. Fresh) [Flip]]) then (((λx_3. Fresh) [Flip]) == (if (Flip) then (Fresh) else (Fresh))) else (if (Flip) then (Flip) else (Flip))
-expression1 :: Expr 'TBool
-expression1 = 
-  If (Apply (Lambda [Id ("x_1", 𝔸)] Flip) [Apply (Lambda [Id ("x_2", 𝔹)] Fresh) [Flip]]) 
-    (Apply (Lambda [Id ("x_3", 𝔹)] Fresh) [Flip]
-    `Eq`  
-    If Flip Fresh Fresh) $
-    If Flip Flip Flip
 
 
 

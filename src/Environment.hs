@@ -23,6 +23,7 @@ class Environment env where
   makeEnv :: [(Ident a, (Val env) a)] -> env
   -- names :: env v -> [Exists Ident]
   union :: env -> env -> env
+  length :: env -> Int
 
 -- list of pairs of identifiers and values
 newtype IdentVal v a = IdentVal (Ident a, v a)
