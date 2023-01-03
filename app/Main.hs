@@ -173,38 +173,40 @@ testSemantics exps =
     putStrLn "______________________________________________"
 
 -- exp10 =
--- Pair (Let (x_1 := (λx_1. (λx_2. Fresh))) in Let (x_2 := Fresh) in x_2, Match Pair (Let (x_1 := MemoBernoulli 0.995) in (λx_2. x_2), Match Pair (MemoBernoulli 0.232, (λx_1. Fresh)) with (x_1, x_2) -> ((λx_3. Fresh))) with (x_1, x_2) -> (Match Pair ((λx_3. Fresh), x_2) with (x_3, x_4) -> ((λx_5. Fresh))))
-exp10 :: Expr ('TProduct 'TAtom ('TArrow '[ 'TAtom] 'TAtom))
+-- Pair (Let (x_1 := (λx_1. (λx_2. Fresh)) `Apply` [(λx_1. x_1)]) in Let (x_2 := Fresh) in x_2, Match Pair (Let (x_1 := MemoBernoulli 0.995) in (λx_2. x_2), Match Pair (MemoBernoulli 0.232, (λx_1. Fresh)) with (x_1, x_2) -> (Fresh)) with (x_1, x_2) -> (Match Pair ((λx_3. Fresh), x_2) with (x_3, x_4) -> (Fresh)))
+exp10 :: Expr ('TProduct 'TAtom 'TAtom)
 exp10 =
-  Pair 
-  ( 
-    Let (Val (Id ("x_1", Arr 𝔸 (Arr 𝔸 𝔸))) (Lambda [Id ("x_1", 𝔸)] (Lambda [Id ("x_2", 𝔸)] Fresh))) $
-      Let (Val (Id ("x_2", 𝔸)) Fresh) $
-      Variable (Id ("x_2", 𝔸))
+  Pair
+  (
+    Let 
+      (Val 
+        (Id ("x_1", Arr 𝔸 𝔸)) 
+        (Apply (Lambda [Id ("x_1", Arr 𝔸 𝔸)] (Lambda [Id ("x_2", 𝔸)] Fresh)) [Lambda [Id ("x_1", 𝔸)] (Variable (Id ("x_1", 𝔸)))]))
+      (Let (Val (Id ("x_2", 𝔸)) Fresh) $
+        Variable (Id ("x_2", 𝔸)))
   )
   (
-    Match 
+    Match
       (Pair
-      (Let (Val (Id ("x_1", MemFn)) (MemoBernoulli 0.995)) 
-        $ Lambda [Id ("x_2", 𝔸)] (Variable (Id ("x_2", 𝔸))))
-      (Match 
-        (Pair 
-          (MemoBernoulli 0.232) 
-          (Lambda [Id ("x_1", 𝔸)] Fresh)) 
-        (Id ("x_1", MemFn), Id ("x_2", Arr 𝔸 𝔸)) 
-        (Lambda [Id ("x_3", 𝔸)] Fresh)))
-      (Id ("x_1", Arr 𝔸 𝔸), Id ("x_2", Arr 𝔸 𝔸))
+        (Let (Val (Id ("x_1", MemFn)) (MemoBernoulli 0.995)) $ 
+        Lambda [Id ("x_2", 𝔸)] (Variable (Id ("x_2", 𝔸))))
+        (Match 
+          (Pair (MemoBernoulli 0.232) (Lambda [Id ("x_1", 𝔸)] Fresh)) 
+          (Id ("x_1", MemFn), Id ("x_2", Arr 𝔸 𝔸)) 
+          Fresh)
+      )
+      (Id ("x_1", Arr 𝔸 𝔸), Id ("x_2", 𝔸))
       (Match 
         (Pair 
           (Lambda [Id ("x_3", 𝔸)] Fresh) 
           (Variable (Id ("x_2", 𝔸)))) 
         (Id ("x_3", Arr 𝔸 𝔸), Id ("x_4", 𝔸)) 
-        (Lambda [Id ("x_5", 𝔸)] Fresh))
+        Fresh)
   )
 
 -- exp11 =
 -- Pair (Match Pair (Let (x_1 := Fresh) in x_1, Let (x_1 := Fresh) in (λx_2. Flip)) with (x_1, x_2) -> (If (Flip) then (Fresh) else (x_1)), Match Pair (Let (x_1 := Fresh) in x_1, (λx_1. x_1) `Apply` [(λx_1. x_1)]) with (x_1, x_2) -> ((λx_3. Fresh) `Apply` [MemoBernoulli 0.346]))
-exp11 :: Expr _
+exp11 :: Expr ('TProduct 'TAtom 'TAtom)
 exp11 =
   Pair
   (
@@ -223,18 +225,21 @@ exp11 =
       (Lambda [Id ("x_3", MemFn)] Fresh `Apply` [MemoBernoulli 0.346])
   )
 
+
+
 main :: IO ()
 main = do
   -- let exps = [This exp8, This exp2, This exp3, This exp4]
   -- exps <- generate (vectorOf 2 (resize 4 arbitrary :: Gen (Exists Expr)))
   -- testSemantics exps
   -- quickCheck prop_semanticsEquivalent
-  let exps0 = [This exp1, This exp2, This exp3, This exp4, This exp5, This exp6, This exp7, This exp8, This exp9, This exp10]
-  forM_ exps0 (\(This e) -> print e)
-  -- let exps = [This exp10]
-  -- forM_ exps $ \(This e) -> do
-  --   pPrint e
-  --   let T ev = den e initEnv
-  --       res = Dist.norm $ Dist.norm $ simplify' <$> State.runStateT ev (initMem, S Map.empty)
-  --   print res
-  --   putStrLn "______________________________________________"
+  let exps = [This exp10, This exp11]
+  forM_ exps $ \(This e) -> do
+    pPrint e
+    let T ev1 = bigStepComplete e initEnv
+        T ev2 = smallStepIteratedComplete e initEnv
+        res1 = Dist.norm $ Dist.norm $ simplify' <$> State.runStateT ev1 (initMem, S Map.empty)
+        res2 = Dist.norm $ Dist.norm $ simplify' <$> State.runStateT ev2 (initMem, S Map.empty)
+    putStrLn $ "bigStepComplete: \n" ++ Dist.pretty show res1
+    putStrLn $ "smallStepIteratedComplete: \n" ++ Dist.pretty show res2
+    putStrLn "______________________________________________"
