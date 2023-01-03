@@ -3,7 +3,6 @@
 module Main where
 
 import qualified Data.Map as Map
-import qualified Data.List as List
 
 import Control.Monad (forM_)
 
@@ -21,6 +20,8 @@ import Semantics
 
 
 -- let-bind two atoms and apply a function comparing two atoms to them
+-- exp1 = 
+-- Let (x := Flip) in Let (y := Flip) in (λx'. (x') == (x)) `Apply` [y]
 exp1 :: Expr 'TBool
 exp1 =
   Let (Val (Id ("x", 𝔹)) Flip) $
@@ -34,6 +35,8 @@ exp1 =
 -- | NB: The memoization state/memory is global, not local to the body of Lambda expressions (does carry over outside the scope of the body)
 -- | cf. exp2 vs exp3
 
+-- exp2 =
+-- Let (x := Fresh) in Let (y := Fresh) in Let (f := MemoBernoulli 0.5) in Let (g := (λx'. (λy'. (f `MemoApply` (x')) == (f `MemoApply` (y'))))) in g `Apply` [x] `Apply` [y]
 exp2 :: Expr 'TBool
 exp2 =
   Let (Val (Id ("x", 𝔸)) Fresh) $
@@ -48,6 +51,8 @@ exp2 =
     (Apply (Variable (Id ("g", Arr 𝔸 (Arr 𝔸 𝔹)))) [Variable (Id ("x", 𝔸))]) 
     [Variable (Id ("y", 𝔸))]
 
+-- exp3 =
+-- Let (x := Fresh) in Let (y := Fresh) in Let (f := MemoBernoulli 0.5) in (f `MemoApply` (x)) == (f `MemoApply` (y))
 exp3 :: Expr 'TBool
 exp3 =
   Let (Val (Id ("x", 𝔸)) Fresh) $
@@ -55,6 +60,8 @@ exp3 =
   Let (Val (Id ("f", MemFn)) (MemoBernoulli 0.5)) $
   Eq (MemoApply (Variable (Id ("f", MemFn))) (Variable (Id ("x", 𝔸)))) (MemoApply (Variable (Id ("f", MemFn))) (Variable (Id ("y", 𝔸))))
 
+-- exp4 =
+-- Let (x := Fresh) in Let (y := Fresh) in Let (f := MemoBernoulli 0.5) in (f `MemoApply` (x)) == (True)
 exp4 :: Expr 'TBool
 exp4 =
   Let (Val (Id ("x", 𝔸)) Fresh) $
@@ -62,9 +69,9 @@ exp4 =
   Let (Val (Id ("f", MemFn)) (MemoBernoulli 0.5)) $
   Eq (MemoApply (Variable (Id ("f", MemFn))) (Variable (Id ("x", 𝔸)))) (Bool True)
 
-exp5 :: Expr 'TBool 
--- exp5 is the expression (where == is syntactic sugar for the Eq construct):
--- "if (λ (x_1) flip())((λ (x_1) fresh())(flip())) then (λ (x_1) fresh())(flip()) == (if flip() then fresh() else fresh()) else (if flip() then fresh() else fresh()), (if flip() then fresh() else fresh())"
+-- exp5 =
+-- If ((λx_1. Flip) `Apply` [(λx_2. Fresh) `Apply` [Flip]]) then (((λx_3. Fresh) `Apply` [Flip]) == (If (Flip) then (Fresh) else (Fresh))) else (If (Flip) then (Flip) else (Flip))
+exp5 :: Expr 'TBool
 exp5 = 
   If (Apply (Lambda [Id ("x_1", 𝔸)] Flip) [Apply (Lambda [Id ("x_2", 𝔹)] Fresh) [Flip]]) 
     (Apply (Lambda [Id ("x_3", 𝔹)] Fresh) [Flip]
@@ -72,7 +79,8 @@ exp5 =
     If Flip Fresh Fresh) $
     If Flip Flip Flip
 
--- exp6: if ((λx_1. Flip) [(λx_2. Fresh) [Flip]]) then (((λx_3. Fresh) [Flip]) == (if (Flip) then (Fresh) else (Fresh))) else (if (Flip) then (Flip) else (Flip))
+-- exp6 =
+-- If ((λx_1. Flip) `Apply` [(λx_2. Fresh) `Apply` [Flip]]) then (((λx_3. Fresh) `Apply` [Flip]) == (If (Flip) then (Fresh) else (Fresh))) else (If (Flip) then (Flip) else (Flip))
 exp6 :: Expr 'TBool
 exp6 = 
   If (Apply (Lambda [Id ("x_1", 𝔸)] Flip) [Apply (Lambda [Id ("x_2", 𝔹)] Fresh) [Flip]]) 
@@ -81,7 +89,8 @@ exp6 =
     If Flip Fresh Fresh) $
     If Flip Flip Flip
 
--- exp7: ((λx_1. Fresh) [memoBernoulli 0.166 `memoApply` (Fresh)]) == (let (x_1 := (λx_1. x_1)) in (λx_2. Fresh) [(λx_1. Flip)])
+-- exp7 =
+-- ((λx_1. Fresh) `Apply` [MemoBernoulli 0.166 `MemoApply` (Fresh)]) == (Let (x_1 := (λx_1. x_1)) in (λx_2. Fresh) `Apply` [(λx_1. Fresh)])
 exp7 :: Expr 'TBool
 exp7 = 
   Apply (Lambda [Id ("x_1", 𝔹)] Fresh) [MemoBernoulli 0.166 `MemoApply` Fresh]
@@ -89,7 +98,8 @@ exp7 =
   Let (Val (Id ("x_1", Arr 𝔸 𝔸)) (Lambda [Id ("x_1", 𝔸)] (Variable (Id ("x_1", 𝔸))))) 
   (Apply (Lambda [Id ("x_2", Arr 𝔸 𝔸)] Fresh) [Lambda [Id ("x_1", 𝔸)] Fresh])
 
--- exp8: Match (Match ((Fresh) == (Fresh), let (x_1 := (λx_1. x_1)) in Fresh) with (x_1, x_2) -> (let (x_3 := (λx_3. Fresh)) in memoBernoulli 0.403), Match (if (Flip) then ((λx_1. Fresh)) else ((λx_1. Fresh)), let (x_1 := (λx_1. x_1)) in Flip) with (x_1, x_2) -> (if (x_2) then (memoBernoulli 0.795) else (memoBernoulli 0.826))) with (x_1, x_2) -> (Fresh)
+-- exp8 = 
+-- Match Pair (Match Pair ((Fresh) == (Fresh), Let (x_1 := (λx_1. x_1)) in Fresh) with (x_1, x_2) -> (Let (x_3 := (λx_3. Fresh)) in MemoBernoulli 0.403), Match Pair (If (Flip) then ((λx_1. Fresh)) else ((λx_1. Fresh)), Let (x_1 := (λx_1. x_1)) in Flip) with (x_1, x_2) -> (If (x_2) then (MemoBernoulli 0.795) else (MemoBernoulli 0.826))) with (x_1, x_2) -> (Fresh)
 exp8 :: Expr 'TAtom
 exp8 = 
   Match (
@@ -108,7 +118,8 @@ exp8 =
   (Id ("x_1", MemFn), Id ("x_2", MemFn)) 
   Fresh
 
--- exp9 = If ((λx_1. Flip) [Match (MemoBernoulli 0.207, Fresh) with (x_1, x_2) -> ((λx_3. x_2))]) then (If ((Flip) == (Flip)) then (Match (Fresh, Flip) with (x_1, x_2) -> ((λx_3. Fresh))) else ((λx_1. x_1))) else ((λx_1. Fresh))
+-- exp9 = 
+-- If ((λx_1. Flip) `Apply` [Match Pair (MemoBernoulli 0.207, Fresh) with (x_1, x_2) -> ((λx_3. x_2))]) then (If ((Flip) == (Flip)) then (Match Pair (Fresh, Flip) with (x_1, x_2) -> ((λx_3. Fresh))) else ((λx_1. x_1))) else ((λx_1. Fresh))
 exp9 :: Expr ('TArrow '[ 'TAtom] 'TAtom)
 exp9 = 
   If (Apply (Lambda [Id ("x_1", Arr 𝔸 𝔸)] Flip) [Match (Pair (MemoBernoulli 0.207) Fresh) (Id ("x_1", MemFn), Id ("x_2", 𝔸)) (Lambda [Id ("x_3", 𝔸)] (Variable (Id ("x_2", 𝔸))))])
@@ -161,34 +172,69 @@ testSemantics exps =
     forM_ res (putStrLn . Dist.pretty show)
     putStrLn "______________________________________________"
 
+-- exp10 =
+-- Pair (Let (x_1 := (λx_1. (λx_2. Fresh))) in Let (x_2 := Fresh) in x_2, Match Pair (Let (x_1 := MemoBernoulli 0.995) in (λx_2. x_2), Match Pair (MemoBernoulli 0.232, (λx_1. Fresh)) with (x_1, x_2) -> ((λx_3. Fresh))) with (x_1, x_2) -> (Match Pair ((λx_3. Fresh), x_2) with (x_3, x_4) -> ((λx_5. Fresh))))
+exp10 :: Expr ('TProduct 'TAtom ('TArrow '[ 'TAtom] 'TAtom))
+exp10 =
+  Pair 
+  ( 
+    Let (Val (Id ("x_1", Arr 𝔸 (Arr 𝔸 𝔸))) (Lambda [Id ("x_1", 𝔸)] (Lambda [Id ("x_2", 𝔸)] Fresh))) $
+      Let (Val (Id ("x_2", 𝔸)) Fresh) $
+      Variable (Id ("x_2", 𝔸))
+  )
+  (
+    Match 
+      (Pair
+      (Let (Val (Id ("x_1", MemFn)) (MemoBernoulli 0.995)) 
+        $ Lambda [Id ("x_2", 𝔸)] (Variable (Id ("x_2", 𝔸))))
+      (Match 
+        (Pair 
+          (MemoBernoulli 0.232) 
+          (Lambda [Id ("x_1", 𝔸)] Fresh)) 
+        (Id ("x_1", MemFn), Id ("x_2", Arr 𝔸 𝔸)) 
+        (Lambda [Id ("x_3", 𝔸)] Fresh)))
+      (Id ("x_1", Arr 𝔸 𝔸), Id ("x_2", Arr 𝔸 𝔸))
+      (Match 
+        (Pair 
+          (Lambda [Id ("x_3", 𝔸)] Fresh) 
+          (Variable (Id ("x_2", 𝔸)))) 
+        (Id ("x_3", Arr 𝔸 𝔸), Id ("x_4", 𝔸)) 
+        (Lambda [Id ("x_5", 𝔸)] Fresh))
+  )
+
+-- exp11 =
+-- Pair (Match Pair (Let (x_1 := Fresh) in x_1, Let (x_1 := Fresh) in (λx_2. Flip)) with (x_1, x_2) -> (If (Flip) then (Fresh) else (x_1)), Match Pair (Let (x_1 := Fresh) in x_1, (λx_1. x_1) `Apply` [(λx_1. x_1)]) with (x_1, x_2) -> ((λx_3. Fresh) `Apply` [MemoBernoulli 0.346]))
+exp11 :: Expr _
+exp11 =
+  Pair
+  (
+    Match
+      (Pair
+        (Let (Val (Id ("x_1", 𝔸)) Fresh) $ Variable (Id ("x_1", 𝔸)))
+        (Let (Val (Id ("x_1", 𝔸)) Fresh) $ Lambda [Id ("x_2", 𝔸)] Flip))
+      (Id ("x_1", 𝔸), Id ("x_2", Arr 𝔸 𝔹))
+      (If Flip Fresh (Variable (Id ("x_1", 𝔸)))))
+  (
+    Match
+      (Pair
+        (Let (Val (Id ("x_1", 𝔸)) Fresh) $ Variable (Id ("x_1", 𝔸)))
+        (Lambda [Id ("x_1", Arr 𝔸 𝔸)] (Variable (Id ("x_1", Arr 𝔸 𝔸))) `Apply` [Lambda [Id ("x_1", 𝔸)] (Variable (Id ("x_1", 𝔸)))]))
+      (Id ("x_1", 𝔸), Id ("x_2", Arr 𝔸 𝔸))
+      (Lambda [Id ("x_3", MemFn)] Fresh `Apply` [MemoBernoulli 0.346])
+  )
+
 main :: IO ()
 main = do
   -- let exps = [This exp8, This exp2, This exp3, This exp4]
   -- exps <- generate (vectorOf 2 (resize 4 arbitrary :: Gen (Exists Expr)))
   -- testSemantics exps
   -- quickCheck prop_semanticsEquivalent
-  let exps = [This exp9]
-  forM_ exps $ \(This e) -> do
-    let T ev = den e initEnv
-        res = Dist.norm $ Dist.norm $ simplify' <$> State.runStateT ev (initMem, S Map.empty)
-    print res
-    putStrLn "______________________________________________"
-    print $ Dist.norm res
-    let res' = Dist.decons res
-    print res'
-    putStrLn "______________________________________________"
-    let res'' = Map.toList $ Map.fromListWith (+) res'
-    print res''
-    let (x0@(v0, fns0, atms0), _) = head res''
-        (x1@(v1, fns1, atms1), _) = last res''
-    print v0
-    print v1
-    print $ x0 == x1
-    putStrLn "______________________________________________"
-    let res''' = forcedGrouping res''
-    print res'''
-    let (x0@(v0, fns0, atms0), _) = head res'''
-        (x1@(v1, fns1, atms1), _) = last res'''
-    print v0
-    print v1
-    print $ x0 == x1
+  let exps0 = [This exp1, This exp2, This exp3, This exp4, This exp5, This exp6, This exp7, This exp8, This exp9, This exp10]
+  forM_ exps0 (\(This e) -> print e)
+  -- let exps = [This exp10]
+  -- forM_ exps $ \(This e) -> do
+  --   pPrint e
+  --   let T ev = den e initEnv
+  --       res = Dist.norm $ Dist.norm $ simplify' <$> State.runStateT ev (initMem, S Map.empty)
+  --   print res
+  --   putStrLn "______________________________________________"

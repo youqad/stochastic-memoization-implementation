@@ -106,7 +106,7 @@ instance Show (Expr a) where
     ppExpr (Atom a) = text $ show a
     ppExpr (Bool b) = text $ show b
     ppExpr (If e1 e2 e3) = text "If" <+> parens (ppExpr (unsafeCoerce e1)) <+> text "then" <+> parens (ppExpr e2) <+> text "else" <+> parens (ppExpr e3)
-    ppExpr (Pair e1 e2) = parens (ppExpr (unsafeCoerce e1) Text.PrettyPrint.<> text "," <+> ppExpr (unsafeCoerce e2))
+    ppExpr (Pair e1 e2) = text "Pair" <+> parens (ppExpr (unsafeCoerce e1) Text.PrettyPrint.<> text "," <+> ppExpr (unsafeCoerce e2))
     ppExpr (Match e (Id (x, _), Id (y, _)) e') = text "Match" <+> ppExpr (unsafeCoerce e) 
         <+> text "with" 
         <+> parens (text x Text.PrettyPrint.<> text "," <+> text y) 
@@ -115,7 +115,7 @@ instance Show (Expr a) where
     ppExpr (Variable (Id (x, _))) = text x
     ppExpr (Lambda [] e) = ppExpr (unsafeCoerce e)
     ppExpr (Lambda (Id (x, _):xs) e) = parens (text "λ" Text.PrettyPrint.<> text x Text.PrettyPrint.<> text "." <+> ppExpr (Lambda xs e))
-    ppExpr (Apply e1 e2) = ppExpr (unsafeCoerce e1) <+> brackets (hsep (map ppExpr (unsafeCoerce e2)))
+    ppExpr (Apply e1 e2) = ppExpr (unsafeCoerce e1) <+> text "`Apply`" <+> brackets (hsep (map ppExpr (unsafeCoerce e2)))
     ppExpr (MemoBernoulli p) = text "MemoBernoulli" <+> text (show p)
     ppExpr (MemoApply e1 e2) = ppExpr (unsafeCoerce e1) <+> text "`MemoApply`" <+> parens (ppExpr (unsafeCoerce e2))
     ppExpr (Eq e1 e2) = parens (ppExpr (unsafeCoerce e1)) <+> text "==" <+> parens (ppExpr (unsafeCoerce e2))
