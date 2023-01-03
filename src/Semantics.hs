@@ -4,6 +4,7 @@ module Semantics where
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import Data.List (partition)
 
 import Data.Maybe (fromJust)
 import Control.Monad (forM_, forM, foldM)
@@ -32,6 +33,26 @@ approx' (Dist.Cons xs) (Dist.Cons ys) =
       (yse, ysp) = unzip (Dist.norm' ys)
   in  xse == yse &&
       all (\p -> abs p < 1e-2) (zipWith (-) xsp ysp)
+
+forcedGrouping :: (Eq a, Num b) => [(a, b)] -> [(a, b)]
+forcedGrouping ls = case ls of
+  [] -> []
+  ((x, p):xs) -> 
+    let (xs', notxs') = partition ((== x) . fst) xs
+        p' = sum $ p : map snd xs' in
+    (x, p') : forcedGrouping notxs'
+
+-- | @approx''@ = @approx'@, but with forced grouping in case @Dist.norm'@ didn't group all values.
+approx'' :: (RealFloat prob, Ord a) =>
+  Dist.T prob a -> Dist.T prob a -> Bool
+approx'' dist1@(Dist.Cons xs) dist2@(Dist.Cons ys) =
+  approx' dist1 dist2 || 
+  (let
+    (xse, xsp) = unzip (forcedGrouping (Dist.norm' xs))
+    (yse, ysp) = unzip (forcedGrouping (Dist.norm' ys)) in
+    xse == yse
+      && all (\ p -> abs p < 1e-2) (zipWith (-) xsp ysp))
+
 
 ------------------------
 -- | SEMANTICS

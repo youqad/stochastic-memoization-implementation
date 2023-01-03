@@ -19,10 +19,10 @@ spec = do
         $ prop "is equivalent to denotational semantics" $ \(This expr) ->
           let bigStepResult = run bigStepComplete expr
               denResult = run den expr in
-          -- test that the two semantics agree on the distribution with @approx'@, and if they don't, display the two distributions
+          -- test that the two semantics agree on the distribution with @approx''@, and if they don't, display the two distributions
           (Dist.pretty show bigStepResult ++ "\n  |bigStep| ≠ |denotational| \n\n" ++ Dist.pretty show denResult) 
           `counterexample` 
-          approx' bigStepResult denResult
+          approx'' bigStepResult denResult
       modifyMaxSize (const 8) 
         $ modifyMaxSuccess (const 1000) 
         $ prop "is equivalent to small-step semantics" $ \(This expr) ->
@@ -30,4 +30,4 @@ spec = do
               smallStepResult = run smallStepIteratedComplete expr in
           (Dist.pretty show bigStepResult ++ "\n  |bigStep| ≠ |smallStep| \n\n" ++ Dist.pretty show smallStepResult) 
           `counterexample` 
-          approx' bigStepResult smallStepResult
+          approx'' bigStepResult smallStepResult

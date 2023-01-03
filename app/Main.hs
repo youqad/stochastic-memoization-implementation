@@ -3,6 +3,7 @@
 module Main where
 
 import qualified Data.Map as Map
+import qualified Data.List as List
 
 import Control.Monad (forM_)
 
@@ -166,4 +167,28 @@ main = do
   -- exps <- generate (vectorOf 2 (resize 4 arbitrary :: Gen (Exists Expr)))
   -- testSemantics exps
   -- quickCheck prop_semanticsEquivalent
-  testSemantics [This exp9]
+  let exps = [This exp9]
+  forM_ exps $ \(This e) -> do
+    let T ev = den e initEnv
+        res = Dist.norm $ Dist.norm $ simplify' <$> State.runStateT ev (initMem, S Map.empty)
+    print res
+    putStrLn "______________________________________________"
+    print $ Dist.norm res
+    let res' = Dist.decons res
+    print res'
+    putStrLn "______________________________________________"
+    let res'' = Map.toList $ Map.fromListWith (+) res'
+    print res''
+    let (x0@(v0, fns0, atms0), _) = head res''
+        (x1@(v1, fns1, atms1), _) = last res''
+    print v0
+    print v1
+    print $ x0 == x1
+    putStrLn "______________________________________________"
+    let res''' = forcedGrouping res''
+    print res'''
+    let (x0@(v0, fns0, atms0), _) = head res'''
+        (x1@(v1, fns1, atms1), _) = last res'''
+    print v0
+    print v1
+    print $ x0 == x1
