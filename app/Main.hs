@@ -225,6 +225,18 @@ exp11 =
       (Lambda [Id ("x_3", MemFn)] Fresh `Apply` [MemoBernoulli 0.346])
   )
 
+-- exp12 = 
+-- Let ( x_1 := ( λx_1. ( λx_2. Fresh ) ) `Apply` [ ( λx_1. x_1 ) ]) 
+-- in Let ( x_2 := Fresh ) in x_2
+
+exp12 :: Expr 'TAtom
+exp12 = 
+  Let 
+    (Val 
+      (Id ("x_1", Arr 𝔸 𝔸)) 
+      (Apply (Lambda [Id ("x_1", Arr 𝔸 𝔸)] (Lambda [Id ("x_2", 𝔸)] Fresh)) [Lambda [Id ("x_1", 𝔸)] (Variable (Id ("x_1", 𝔸)))]))
+    (Let (Val (Id ("x_2", 𝔸)) Fresh) $
+      Variable (Id ("x_2", 𝔸)))
 
 
 main :: IO ()
@@ -233,7 +245,7 @@ main = do
   -- exps <- generate (vectorOf 2 (resize 4 arbitrary :: Gen (Exists Expr)))
   -- testSemantics exps
   -- quickCheck prop_semanticsEquivalent
-  let exps = [This exp10, This exp11]
+  let exps = [This exp10, This exp11, This exp12]
   forM_ exps $ \(This e) -> do
     pPrint e
     let T ev1 = bigStepComplete e initEnv
