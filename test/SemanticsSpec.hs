@@ -15,7 +15,7 @@ spec :: Spec
 spec = do
     describe "Big-step semantics" $ do
       modifyMaxSize (const 8) 
-        $ modifyMaxSuccess (const 1000) 
+        $ modifyMaxSuccess (const 1500) 
         $ prop "is equivalent to denotational semantics" $ \(This expr) ->
           let bigStepResult = run bigStepComplete expr
               denResult = run den expr in
@@ -24,10 +24,10 @@ spec = do
           `counterexample` 
           approx'' bigStepResult denResult
       modifyMaxSize (const 8) 
-        $ modifyMaxSuccess (const 1000) 
+        $ modifyMaxSuccess (const 1500) 
         $ prop "is equivalent to small-step semantics" $ \(This expr) ->
           let bigStepResult = run bigStepComplete expr
-              smallStepResult = run smallStepIteratedComplete expr in
+              smallStepResult = run smallStepIteratedComplete' expr in
           (Dist.pretty show bigStepResult ++ "\n  |bigStep| ≠ |smallStep| \n\n" ++ Dist.pretty show smallStepResult) 
           `counterexample` 
           approx'' bigStepResult smallStepResult

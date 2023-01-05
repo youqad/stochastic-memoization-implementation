@@ -6,17 +6,18 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.List (partition)
 
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, isJust)
 import Control.Monad (forM_, unless, forM, foldM)
 
 import qualified Numeric.Probability.Distribution as Dist
 import qualified Control.Monad.State as State
 -- import qualified Control.Monad.Trans.State.Strict as State
--- import Debug.Trace (trace)
+-- import Debug.Trace (trace, traceM)
 
 import Syntax
 import Environment
 import Values
+-- import Text.Pretty.Simple (pPrintString, pShow)
 
 ------------------------
 -- | PROBABILITY DISTRIBUTIONS
@@ -308,33 +309,32 @@ addRestore (envTemp', env') = do
     Just envs' -> State.put (flag, Just ((envTemp', env') : envs'), envTemp, env)
     Nothing -> State.put (flag, Just [(envTemp', env')], envTemp, env)
 
-restoreEnvAndReturn :: Value a -> 𝒯 (ExprOrValue a)
-restoreEnvAndReturn v = do
+restoreEnv :: 𝒯 ()
+restoreEnv = do
   (_, toBeRestored, envTemp, env) <- State.get 
   case toBeRestored of
     Just ((envTemp', env') : envs) -> do
       State.put (False, Just envs, envTemp', env')
-      return (Right v)
     _ -> do 
       State.put (False, Nothing, envTemp, env)
-      return (Right v)
 
 -- smallStep': 
 smallStep' :: Expr a -> 𝒯 (ExprOrValue a)
-smallStep' (Atom a) = restoreEnvAndReturn $ AtomVal a
-smallStep' (Bool b) = restoreEnvAndReturn $ BoolVal b
+smallStep' (Atom a) = return $ Right $ AtomVal a
+smallStep' (Bool b) = return $ Right $ BoolVal b
 smallStep' (If e1 e2 e3) = do
   e1' <- smallStep' e1
   case e1' of
     Left e1'' -> do
-      return (Left $ If e1'' e2 e3)
+      return $ Left $ If e1'' e2 e3
     Right (BoolVal True) -> do
-      return (Left e2)
+      return $ Left e2
     Right (BoolVal False) -> do
-      return (Left e3)
+      return $ Left e3
 smallStep' (Pair e1 e2) = do
+  (_, _, envT, _) <- State.get
   case e1 of
-    Variable x -> do
+    Variable x | isJust (maybeFind envT x) -> do
       (flag, _, envTemp, env) <- State.get
       unless flag $ addRestore (envTemp, env)
       setFlag False
@@ -342,13 +342,14 @@ smallStep' (Pair e1 e2) = do
       case e2' of
         Left e2'' -> do
           setFlag True
-          return (Left $ Pair (Variable x) e2'')
+          return $ Left $ Pair (Variable x) e2''
         Right v2 -> do
+          restoreEnv
           let v1 = find (envTemp `union` env) x
-          restoreEnvAndReturn $ PairVal v1 v2 
+          return $ Right $ PairVal v1 v2 
             $ Prod (typeFromVal v1) (typeFromVal v2)
     _ -> do
-      (flag, envs, envTemp, env) <- State.get
+      (flag, _, envTemp, env) <- State.get
       unless flag $ addRestore (envTemp, env)
       setFlag False
       e1' <- smallStep' e1
@@ -357,37 +358,40 @@ smallStep' (Pair e1 e2) = do
           setFlag True
           return (Left $ Pair e1'' e2)
         Right v1 -> do
-          let varName = "xTemp_" ++ show (Environment.length envTemp 
-                      + Environment.length env + 1)
+          restoreEnv
+          (_, envs', envTemp', env') <- State.get
+          let varName = "xTemp_" ++ show (Environment.length envTemp' 
+                      + Environment.length env' + 1)
               ident = Id (varName, typeFromVal v1)
-              envTemp' = define envTemp ident v1
-          State.put (False, envs, envTemp', env)
-          return (Left $ Pair (Variable ident) e2)
+              envTemp'' = define envTemp' ident v1
+          State.put (False, envs', envTemp'', env')
+          return $ Left $ Pair (Variable ident) e2
 smallStep' (Match e1 (x1, x2) e2) = do
   e1' <- smallStep' e1
   case e1' of
     Left e1'' -> do
-      return (Left $ Match e1'' (x1, x2) e2)
+      return $ Left $ Match e1'' (x1, x2) e2
     Right (PairVal v1 v2 _) -> do
       (flag, toBeRestored, envTemp, env) <- State.get
       let ids = [This x1, This x2]
           vs = [This v1, This v2]
           env' = defArgs env ids vs
       State.put (flag, toBeRestored, envTemp, env')
-      return (Left e2)
+      return $ Left e2
 smallStep' (Variable x) = do
   (_, _, envTemp, env) <- State.get 
-  restoreEnvAndReturn $ find (envTemp `union` env) x
+  return $ Right $ find (envTemp `union` env) x
 smallStep' (Lambda xs e1) = do
   (_, _, envTemp, env) <- State.get
   let env' = envTemp `union` env
-  restoreEnvAndReturn $ Function
+  return $ Right $ Function
         (\arg -> bigStep e1 $ defArgs env' (map This xs) [This arg])
         (Lambda xs e1)
         $ typeFromExpr (Lambda xs e1)
 smallStep' (Apply f es) = do
+  (_, _, envT, _) <- State.get
   case f of
-    Variable x -> do
+    Variable x | isJust (maybeFind envT x) -> do
       (flag, _, envTemp, env) <- State.get
       unless flag $ addRestore (envTemp, env)
       setFlag False
@@ -395,33 +399,37 @@ smallStep' (Apply f es) = do
       case head es' of
         Left e' -> do
           setFlag True
-          return (Left $ Apply (Variable x) (e':tail es))
+          return $ Left $ Apply (Variable x) (e':tail es)
         Right v -> do
+          restoreEnv
           let Function f' _ _ = find (envTemp `union` env) x
           res <- State.lift $ f' v 
-          restoreEnvAndReturn res
+          return $ Right res
     _ -> do
-      (flag, envs, envTemp, env) <- State.get
+      (flag, _, envTemp, env) <- State.get
       unless flag $ addRestore (envTemp, env)
       setFlag False
       f' <- smallStep' f
       case f' of
         Left f'' -> do
           setFlag True
-          return (Left $ Apply f'' es)
+          return $ Left $ Apply f'' es
         Right fv -> do
-          let varName = "fTemp_" ++ show (Environment.length envTemp 
-                      + Environment.length env + 1)
+          restoreEnv
+          (_, envs', envTemp', env') <- State.get
+          let varName = "fTemp_" ++ show (Environment.length envTemp' 
+                      + Environment.length env' + 1)
               ident = Id (varName, typeFromVal fv)
-              envTemp' = define envTemp ident fv
-          State.put (False, envs, envTemp', env)
-          return (Left $ Apply (Variable ident) es)
+              envTemp'' = define envTemp' ident fv
+          State.put (False, envs', envTemp'', env')
+          return $ Left $ Apply (Variable ident) es
 smallStep' (MemoBernoulli θ) = do
   f <- State.lift $ freshFnOpSem θ
-  restoreEnvAndReturn $ MemoFunction f
+  return $ Right $ MemoFunction f
 smallStep' (MemoApply f e) = do
+  (_, _, envT, _) <- State.get
   case f of
-    Variable x -> do
+    Variable x | isJust (maybeFind envT x) -> do
       (flag, _, envTemp, env) <- State.get
       unless flag $ addRestore (envTemp, env)
       setFlag False
@@ -431,51 +439,55 @@ smallStep' (MemoApply f e) = do
           setFlag True
           return (Left $ MemoApply (Variable x) e'')
         Right (AtomVal a) -> do
+          restoreEnv
           let MemoFunction f' = find (envTemp `union` env) x
           b <- State.lift $ getOpSem (f', a)
-          restoreEnvAndReturn $ BoolVal b
+          return $ Right $ BoolVal b
     _ -> do
-      (flag, envs, envTemp, env) <- State.get
+      (flag, _, envTemp, env) <- State.get
       unless flag $ addRestore (envTemp, env)
       setFlag False
       f' <- smallStep' f
       case f' of
         Left f'' -> do
           setFlag True
-          return (Left $ MemoApply f'' e)
+          return $ Left $ MemoApply f'' e
         Right fv -> do
-          let varName = "fMemoTemp_" ++ show (Environment.length envTemp 
-                      + Environment.length env + 1)
+          restoreEnv
+          (_, envs', envTemp', env') <- State.get
+          let varName = "fMemoTemp_" ++ show (Environment.length envTemp' 
+                      + Environment.length env' + 1)
               ident = Id (varName, typeFromVal fv)
-              envTemp' = define envTemp ident fv
-          State.put (False, envs, envTemp', env)
-          return (Left $ MemoApply (Variable ident) e)
+              envTemp'' = define envTemp' ident fv
+          State.put (False, envs', envTemp'', env')
+          return $ Left $ MemoApply (Variable ident) e
 smallStep' (Let (Val x e1) e2) = do
   e1' <- smallStep' e1
   case e1' of
     Left e1'' -> do
-      return (Left $ Let (Val x e1'') e2)
+      return $ Left $ Let (Val x e1'') e2
     Right v -> do
       (flag, envs, envTemp, env) <- State.get
       let env' = define env x v
       State.put (flag, envs, envTemp, env')
-      return (Left e2)
+      return $ Left e2
 smallStep' (Sequence e1 e2) = do
   e1' <- smallStep' e1
   case e1' of
     Left e1'' -> do
-      return (Left $ Sequence e1'' e2)
+      return $ Left $ Sequence e1'' e2
     Right _ -> do
-      return (Left e2)
+      return $ Left e2
 smallStep' Fresh = do
   a <- State.lift freshAtmOpSem
-  restoreEnvAndReturn $ AtomVal a
+  return $ Right $ AtomVal a
 smallStep' Flip = do
   b <- State.lift $ T $ State.lift $ bernoulli 0.5
-  restoreEnvAndReturn $ BoolVal b
+  return $ Right $ BoolVal b
 smallStep' (Eq e1 e2) = do
+  (_, _, envT, _) <- State.get
   case e1 of
-    Variable x -> do
+    Variable x | isJust (maybeFind envT x) -> do
       (flag, _, envTemp, env) <- State.get
       unless flag $ addRestore (envTemp, env)
       setFlag False
@@ -483,26 +495,29 @@ smallStep' (Eq e1 e2) = do
       case e2' of
         Left e2'' -> do
           setFlag True
-          return (Left $ Eq (Variable x) e2'')
+          return $ Left $ Eq (Variable x) e2''
         Right v2 -> do
+          restoreEnv
           let v1 = find (envTemp `union` env) x
-          restoreEnvAndReturn $ BoolVal $ v1 == v2
+          return $ Right $ BoolVal $ v1 == v2
     _ -> do
-      (flag, envs, envTemp, env) <- State.get
+      (flag, _, envTemp, env) <- State.get
       unless flag $ addRestore (envTemp, env)
       setFlag False
       e1' <- smallStep' e1
       case e1' of
         Left e1'' -> do
           setFlag True
-          return (Left $ Eq e1'' e2)
+          return $ Left $ Eq e1'' e2
         Right v1 -> do
-          let varName = "eTemp_" ++ show (Environment.length envTemp 
-                      + Environment.length env + 1)
+          restoreEnv
+          (_, envs', envTemp', env') <- State.get
+          let varName = "eTemp_" ++ show (Environment.length envTemp' 
+                      + Environment.length env' + 1)
               ident = Id (varName, typeFromVal v1)
-              envTemp' = define envTemp ident v1
-          State.put (False, envs, envTemp', env)
-          return (Left $ Eq (Variable ident) e2)
+              envTemp'' = define envTemp' ident v1
+          State.put (False, envs', envTemp'', env')
+          return $ Left $ Eq (Variable ident) e2
 
 subst :: Expr a -> EnvVal -> T (Expr a)
 subst (Atom a) _ = return $ Atom a
@@ -560,10 +575,14 @@ smallStepIterated expr = smallStepIt' expr (makeEnv [])
 
 -- using smallStep':
 smallStepIterated' :: Expr a -> EnvVal -> T (Value a)
-smallStepIterated' expr env = smallStepIt' expr (False, Nothing, makeEnv [], env)
+smallStepIterated' expr env = do 
+  let s0 = (False, Nothing, makeEnv [], env)
+  -- traceM $ "Step 0: \n" ++ show expr ++ "\n " ++ show s0 ++ "\n\n"
+  smallStepIt' expr s0
   where 
     smallStepIt' e s = do
       (e', s') <- State.runStateT (smallStep' e) s
+      -- traceM $ "Step " ++ show i ++ ": \n" ++ show e' ++ "\n " ++ show s' ++ "\n\n"
       case e' of
         Left e'' -> smallStepIt' e'' s'
         Right v -> return v
