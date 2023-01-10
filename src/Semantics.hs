@@ -7,7 +7,7 @@ import qualified Data.Set as Set
 import Data.List (partition)
 
 import Data.Maybe (fromJust, isJust)
-import Control.Monad (forM_, unless, forM, foldM)
+import Control.Monad (forM_, when, unless, forM, foldM)
 
 import qualified Numeric.Probability.Distribution as Dist
 import qualified Control.Monad.State as State
@@ -254,35 +254,28 @@ smallStep (Match e1 (x1, x2) e2) = do
       let ids = [This x1, This x2]
           vs = [This v1, This v2]
           env' = defArgs env ids vs
-      State.put (flag, toBeRestored, envTemp, env')
+      State.put (False, toBeRestored, envTemp, env')
       return $ Left e2
 smallStep (Variable x) = do
   (_, _, envTemp, env) <- State.get 
   return $ Right $ find (envTemp `union` env) x
 smallStep (Lambda xs e1) = do
-  (_, _, envTemp, env) <- State.get
-  let env' = envTemp `union` env
   return $ Right $ Function
-        (\arg -> bigStep e1 $ defArgs env' (map This xs) [This arg])
+        (\_ -> error "smallStep: Lambda: impossible case")
         (Lambda xs e1)
         $ typeFromExpr (Lambda xs e1)
 smallStep (Apply f es) = do
   (_, _, envT, _) <- State.get
   case f of
     Variable x | isJust (maybeFind envT x) -> do
-      (flag, _, envTemp, env) <- State.get
-      unless flag $ addRestore (envTemp, env)
-      setFlag False
-      es' <- forM es $ \e -> smallStep e
-      case head es' of
-        Left e' -> do
+      let Function _ f' _ = find envT x
+      case f' of
+        Lambda xs e1 -> do
+          (_, _, envTemp', env') <- State.get
+          addRestore (envTemp', env')
           setFlag True
-          return $ Left $ Apply (Variable x) (e':tail es)
-        Right v -> do
-          restoreEnv
-          let Function f' _ _ = find (envTemp `union` env) x
-          res <- State.lift $ f' v 
-          return $ Right res
+          return $ Left $ Let (Val (head xs) (head es)) e1
+        _ -> error "smallStep: Apply: impossible case"
     _ -> do
       (flag, _, envTemp, env) <- State.get
       unless flag $ addRestore (envTemp, env)
@@ -340,15 +333,39 @@ smallStep (MemoApply f e) = do
           State.put (False, envs', envTemp'', env')
           return $ Left $ MemoApply (Variable ident) e
 smallStep (Let (Val x e1) e2) = do
-  e1' <- smallStep e1
-  case e1' of
-    Left e1'' -> do
-      return $ Left $ Let (Val x e1'') e2
-    Right v -> do
-      (flag, envs, envTemp, env) <- State.get
-      let env' = define env x v
-      State.put (flag, envs, envTemp, env')
-      return $ Left e2
+  (_, _, envT, _) <- State.get
+  case e1 of
+    Variable y | isJust (maybeFind envT y) -> do
+      e2' <- smallStep e2
+      case e2' of
+        Left e2'' -> do
+          return $ Left $ Let (Val x e1) e2''
+        Right v -> do 
+          restoreEnv
+          return $ Right v
+    _ -> do
+      e1' <- smallStep e1
+      case e1' of
+        Left e1'' -> do
+          return $ Left $ Let (Val x e1'') e2
+        Right v -> do
+          (flag, envs, envTemp, env) <- State.get
+          if flag
+            then do
+              -- e2 is the body of a λ-abstraction, 
+              -- so we need to restore the environments later.
+              -- Store the value in a temporary variable
+              let varName = "xLambdaTemp_" ++ show (Environment.length envTemp 
+                          + Environment.length env + 1)
+                  ident = Id (varName, typeFromVal v)
+                  envTemp' = define envTemp ident v
+                  env' = define env x v
+              State.put (False, envs, envTemp', env')
+              return $ Left $ Let (Val x (Variable ident)) e2
+            else do
+              let env' = define env x v
+              State.put (flag, envs, envTemp, env')
+              return $ Left e2
 smallStep (Sequence e1 e2) = do
   e1' <- smallStep e1
   case e1' of
@@ -429,7 +446,8 @@ valueToExpr (PairVal a b _) = (Pair <$> valueToExpr a) <*> valueToExpr b
 
 -- | Transitive closure of small step semantics
 
-smallStepIterate :: Int -> Expr a -> EnvVal -> T (ExprOrValue a, _)
+smallStepIterate :: Int -> Expr a -> EnvVal 
+  -> T (ExprOrValue a, (Flag, Maybe [(EnvVal, EnvVal)], EnvVal, EnvVal))
 smallStepIterate n expr env = do
   let s0 = (False, Nothing, makeEnv [], env)
   smallStepIterate' n expr s0
