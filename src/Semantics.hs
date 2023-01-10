@@ -361,12 +361,14 @@ smallStep (Let (Val x e1) e2) = do
           setFlag flag
           return $ Left $ Let (Val x e1'') e2
         Right v -> do
-          (_, envs, envTemp, env) <- State.get
           if flag
             then do
               -- e2 is the body of a λ-abstraction, 
               -- so we need to restore the environments later.
               -- Store the value in a temporary variable
+              restoreEnv
+              (_, envs, envTemp, env) <- State.get
+              addRestore (envTemp, env)
               let varName = "xLambdaTemp_" ++ show (Environment.length envTemp 
                           + Environment.length env + 1)
                   ident = Id (varName, typeFromVal v)
@@ -375,6 +377,7 @@ smallStep (Let (Val x e1) e2) = do
               State.put (False, envs, envTemp', env')
               return $ Left $ Let (Val x (Variable ident)) e2
             else do
+              (_, envs, envTemp, env) <- State.get
               let env' = define env x v
               State.put (flag, envs, envTemp, env')
               return $ Left e2
@@ -481,7 +484,7 @@ smallStepIterated expr env = do
   traceM $ "Step 0: \n" ++ show expr ++ "\n " ++ show s0 ++ "\n\n"
   smallStepIt 1 expr s0
   where 
-    smallStepIt i e s = do
+    smallStepIt (i :: Int) e s = do
       (e', s') <- State.runStateT (smallStep e) s
       traceM $ "Step " ++ show i ++ ": \n" ++ show e' ++ "\n " ++ show s' ++ "\n\n"
       case e' of

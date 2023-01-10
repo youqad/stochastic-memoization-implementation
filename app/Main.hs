@@ -264,11 +264,26 @@ exp13 =
 
 
 -- exp14:
-exp14:: Expr _ 
+exp14:: Expr 'TAtom
 exp14 = 
   Lambda [Id ("x_1", 𝔸)] (Lambda [Id ("x_2", Arr 𝔸 𝔸)] (Variable (Id ("x_1", 𝔸))))
   `Apply` [Fresh]
   `Apply` [Let (Val (Id ("x_3", 𝔹)) (Bool True)) $ Lambda [Id ("x_4", 𝔸)] (Variable (Id ("x_4", 𝔸)))]
+
+-- exp15 =
+-- (λx_1. (λx_2. x_1)) `Apply` [MemoBernoulli 0.42] `Apply` [(λx_1. Flip) `Apply` [MemoBernoulli 0.64]]
+exp15 :: Expr 'TMemoFun
+exp15 = 
+  Lambda [Id ("x_1", MemFn)] (Lambda [Id ("x_2", 𝔹)] (Variable (Id ("x_1", MemFn))))
+  `Apply` [MemoBernoulli 0.42]
+  `Apply` [Lambda [Id ("x_1", MemFn)] Flip `Apply` [MemoBernoulli 0.64]]
+
+-- exp16 =
+-- (λx_1. x_1 `Apply` [Flip]) `Apply` [(λx_1. Fresh)]
+exp16:: Expr 'TAtom
+exp16 =
+  Lambda [Id ("x_1", Arr 𝔹 𝔸)] (Variable (Id ("x_1", Arr 𝔹 𝔸)) `Apply` [Flip])
+  `Apply` [Lambda [Id ("x_1", 𝔹)] Fresh]
 
 
 main :: IO ()
@@ -277,7 +292,7 @@ main = do
   -- exps <- generate (vectorOf 2 (resize 4 arbitrary :: Gen (Exists Expr)))
   -- testSemantics exps
   -- quickCheck prop_semanticsEquivalent
-  let exps = [This exp14]
+  let exps = [This exp16]
   forM_ exps $ \(This e) -> do
     pPrint e
     let T ev1 = bigStepComplete e initEnv
