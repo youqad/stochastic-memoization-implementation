@@ -7,7 +7,7 @@ import qualified Data.Set as Set
 import Data.List (partition)
 
 import Data.Maybe (fromJust, isJust)
-import Control.Monad (forM_, when, unless, forM, foldM)
+import Control.Monad (forM_, unless, forM, foldM)
 
 import qualified Numeric.Probability.Distribution as Dist
 import qualified Control.Monad.State as State

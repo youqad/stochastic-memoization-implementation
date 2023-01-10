@@ -255,6 +255,22 @@ exp12 =
     (Let (Val (Id ("x_2", 𝔸)) Fresh) $
       Variable (Id ("x_2", 𝔸)))
 
+-- exp13:
+-- Match Pair (If (Flip) then ((λx_1. Fresh)) else ((λx_1. Fresh)), Match Pair ((λx_1. Fresh), Fresh) with (x_1, x_2) -> (x_2)) with (x_1, x_2) -> (Let (x_3 := (λx_3. x_3)) in (λx_4. x_3)) `Apply` [(λx_1. Fresh)]
+exp13 :: Expr _
+exp13 =
+  Match
+    (Pair
+      (If Flip (Lambda [Id ("x_1", 𝔸)] Fresh) (Lambda [Id ("x_1", 𝔸)] Fresh))
+      (Match
+        (Pair
+          (Lambda [Id ("x_1", 𝔸)] Fresh)
+          Fresh)
+        (Id ("x_1", Arr 𝔸 𝔸), Id ("x_2", 𝔸))
+        (Variable (Id ("x_2", 𝔸)))))
+    (Id ("x_1", Arr 𝔸 𝔸), Id ("x_2", 𝔸))
+    (Lambda [Id ("x_4", Arr 𝔸 𝔸)] (Variable (Id ("x_3", MemFn))) `Apply` [Lambda [Id ("x_1", 𝔸)] Fresh])
+
 
 main :: IO ()
 main = do
@@ -262,7 +278,7 @@ main = do
   -- exps <- generate (vectorOf 2 (resize 4 arbitrary :: Gen (Exists Expr)))
   -- testSemantics exps
   -- quickCheck prop_semanticsEquivalent
-  let exps = [This exp11']
+  let exps = [This exp13]
   forM_ exps $ \(This e) -> do
     pPrint e
     let T ev1 = bigStepComplete e initEnv
