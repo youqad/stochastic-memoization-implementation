@@ -12,7 +12,7 @@ import Control.Monad (forM_, unless, forM, foldM)
 import qualified Numeric.Probability.Distribution as Dist
 import qualified Control.Monad.State as State
 -- import qualified Control.Monad.Trans.State.Strict as State
--- import Debug.Trace (trace, traceM)
+import Debug.Trace (trace, traceM)
 
 import Syntax
 import Environment
@@ -353,12 +353,15 @@ smallStep (Let (Val x e1) e2) = do
           restoreEnv
           return $ Right v
     _ -> do
+      flag <- getFlag
+      setFlag False
       e1' <- smallStep e1
       case e1' of
         Left e1'' -> do
+          setFlag flag
           return $ Left $ Let (Val x e1'') e2
         Right v -> do
-          (flag, envs, envTemp, env) <- State.get
+          (_, envs, envTemp, env) <- State.get
           if flag
             then do
               -- e2 is the body of a λ-abstraction, 
@@ -475,14 +478,14 @@ smallStepIterate n expr env = do
 smallStepIterated :: Expr a -> EnvVal -> T (Value a)
 smallStepIterated expr env = do 
   let s0 = (False, Nothing, makeEnv [], env)
-  -- traceM $ "Step 0: \n" ++ show expr ++ "\n " ++ show s0 ++ "\n\n"
-  smallStepIt expr s0
+  traceM $ "Step 0: \n" ++ show expr ++ "\n " ++ show s0 ++ "\n\n"
+  smallStepIt 1 expr s0
   where 
-    smallStepIt e s = do
+    smallStepIt i e s = do
       (e', s') <- State.runStateT (smallStep e) s
-      -- traceM $ "Step " ++ show i ++ ": \n" ++ show e' ++ "\n " ++ show s' ++ "\n\n"
+      traceM $ "Step " ++ show i ++ ": \n" ++ show e' ++ "\n " ++ show s' ++ "\n\n"
       case e' of
-        Left e'' -> smallStepIt e'' s'
+        Left e'' -> smallStepIt (i+1) e'' s'
         Right v -> return v
 
 smallStepIteratedComplete :: Expr a -> EnvVal -> T (Value a)

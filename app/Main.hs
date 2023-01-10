@@ -264,13 +264,11 @@ exp13 =
 
 
 -- exp14:
--- Let (x_1 := If (Flip) then (Fresh) else (Fresh)) in (λx_2. (λx_3. x_2)) `Apply` [x_1] `Apply` [Fresh]
 exp14:: Expr _ 
 exp14 = 
-  Let 
-    (Val (Id ("x_1", 𝔸)) (If Flip Fresh Fresh)) 
-    (Lambda [Id ("x_2", 𝔸)] (Lambda [Id ("x_3", 𝔸)] (Variable (Id ("x_2", 𝔸)))))
-  `Apply` [Variable (Id ("x_1", 𝔸))] `Apply` [Fresh]
+  Lambda [Id ("x_1", 𝔸)] (Lambda [Id ("x_2", Arr 𝔸 𝔸)] (Variable (Id ("x_1", 𝔸))))
+  `Apply` [Fresh]
+  `Apply` [Let (Val (Id ("x_3", 𝔹)) (Bool True)) $ Lambda [Id ("x_4", 𝔸)] (Variable (Id ("x_4", 𝔸)))]
 
 
 main :: IO ()
