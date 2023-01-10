@@ -270,5 +270,5 @@ main = do
         res1 = Dist.norm $ Dist.norm $ simplify' <$> State.runStateT ev1 (initMem, S Map.empty)
         res2 = Dist.norm $ Dist.norm $ simplify' <$> State.runStateT ev2 (initMem, S Map.empty)
     putStrLn $ "bigStepComplete: \n" ++ Dist.pretty show res1
-    putStrLn $ "smallStepIteratedComplete': \n" ++ Dist.pretty show res2
+    putStrLn $ "smallStepIteratedComplete: \n" ++ Dist.pretty show res2
     putStrLn "______________________________________________"
