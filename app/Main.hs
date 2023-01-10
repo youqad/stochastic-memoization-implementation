@@ -266,7 +266,7 @@ main = do
   forM_ exps $ \(This e) -> do
     pPrint e
     let T ev1 = bigStepComplete e initEnv
-        T ev2 = smallStepIteratedComplete' e initEnv
+        T ev2 = smallStepIteratedComplete e initEnv
         res1 = Dist.norm $ Dist.norm $ simplify' <$> State.runStateT ev1 (initMem, S Map.empty)
         res2 = Dist.norm $ Dist.norm $ simplify' <$> State.runStateT ev2 (initMem, S Map.empty)
     putStrLn $ "bigStepComplete: \n" ++ Dist.pretty show res1

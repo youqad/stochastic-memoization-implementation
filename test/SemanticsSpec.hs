@@ -27,7 +27,7 @@ spec = do
         $ modifyMaxSuccess (const 1500) 
         $ prop "is equivalent to small-step semantics" $ \(This expr) ->
           let bigStepResult = run bigStepComplete expr
-              smallStepResult = run smallStepIteratedComplete' expr in
+              smallStepResult = run smallStepIteratedComplete expr in
           (Dist.pretty show bigStepResult ++ "\n  |bigStep| ≠ |smallStep| \n\n" ++ Dist.pretty show smallStepResult) 
           `counterexample` 
           approx'' bigStepResult smallStepResult
