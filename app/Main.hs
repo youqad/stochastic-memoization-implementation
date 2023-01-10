@@ -256,23 +256,12 @@ exp12 =
       Variable (Id ("x_2", 𝔸)))
 
 -- exp13:
--- Match Pair (If (Flip) then ((λx_1. Fresh)) else ((λx_1. Fresh)), Match Pair ((λx_1. Fresh), Fresh) with (x_1, x_2) -> (x_2)) with (x_1, x_2) -> (Let (x_3 := (λx_3. x_3)) in (λx_4. x_3)) `Apply` [(λx_1. Fresh)]
 exp13 :: Expr _
 exp13 =
-  Match
-    (Pair
-      (If Flip (Lambda [Id ("x_1", 𝔸)] Fresh) (Lambda [Id ("x_1", 𝔸)] Fresh))
-      (Match
-        (Pair
-          (Lambda [Id ("x_1", 𝔸)] Fresh)
-          Fresh)
-        (Id ("x_1", Arr 𝔸 𝔸), Id ("x_2", 𝔸))
-        (Variable (Id ("x_2", 𝔸)))))
-    (Id ("x_1", Arr 𝔸 𝔸), Id ("x_2", 𝔸))
-    (Let 
-      (Val (Id ("x_3", Arr 𝔹 𝔹)) (Lambda [Id ("x_3", 𝔹)] (Variable (Id ("x_3", 𝔹))))) 
-      (Lambda [Id ("x_4", Arr 𝔸 𝔸)] (Variable (Id ("x_3", Arr 𝔹 𝔹))))) 
-      `Apply` [Lambda [Id ("x_1", 𝔸)] Fresh]
+    Let 
+      (Val (Id ("x", 𝔸)) Fresh) 
+      (Lambda [Id ("y", 𝔸)] (Variable (Id ("x", 𝔸))))
+    `Apply` [Fresh]
 
 
 main :: IO ()
