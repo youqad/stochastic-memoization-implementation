@@ -45,6 +45,7 @@ data Value :: TType -> Type where
   BoolVal :: Bool -> Value 'TBool
   Function :: (Value a -> T (Value b)) 
     -> Expr ('TArrow '[a] b)
+    -> EnvVal
     -> Typey ('TArrow '[a] b) 
     -> Value ('TArrow '[a] b)
   MemoFunction :: FnLabels -> Value 'TMemoFun
@@ -53,7 +54,7 @@ data Value :: TType -> Type where
 instance Eq (Value a) where
   (AtomVal a) == (AtomVal b) = a == b
   (BoolVal a) == (BoolVal b) = a == b
-  (Function _ e _) == (Function _ e' _) = e == e'
+  (Function _ e _ _) == (Function _ e' _ _) = e == e'
   (MemoFunction a) == (MemoFunction b) = a == b
   (PairVal a b _) == (PairVal c d _) = a == c && b == d
 
@@ -66,7 +67,7 @@ instance Ord (Value a) where
 instance Show (Value a) where
   show (AtomVal (Atm a)) = "<atom ++" ++ show a ++ ">"
   show (BoolVal b) = show b
-  show (Function _ e _) = show e
+  show (Function _ e _ _) = show e
   show (MemoFunction a) = "<memoized function ++" ++ show a ++ ">"
   show (PairVal a b _) = "(" ++ show a ++ ", " ++ show b ++ ")"
 
@@ -116,7 +117,7 @@ initEnv = makeEnv []
 typeFromVal :: Value a -> Typey a
 typeFromVal (AtomVal _) = 𝔸
 typeFromVal (BoolVal _) = 𝔹
-typeFromVal (Function _ _ t) = t
+typeFromVal (Function _ _ _ t) = t
 typeFromVal (MemoFunction _) = MemFn
 typeFromVal (PairVal _ _ t) = t
 

@@ -113,12 +113,13 @@ bigStep (Lambda xs e1) env = do
       -- (bigStep e1 . defArgs env (map This xs) . map This)
       (\arg -> bigStep e1 $ defArgs env (map This xs) [This arg])
       (Lambda xs e1)
+      env
       $ typeFromExpr (Lambda xs e1)
 bigStep (Apply f es) env = do
   fv <- bigStep f env
   vs <- forM es $ \e -> bigStep e env
   case (fv, vs) of
-    (Function f' _ _, _) -> f' (head vs)
+    (Function f' _ _ _, _) -> f' (head vs)
 bigStep (MemoBernoulli θ) _ = do
   f <- freshFnOpSem θ
   return $ MemoFunction f
@@ -179,6 +180,11 @@ setFlag :: Bool -> 𝒯 ()
 setFlag b = do
   (_, envs, envTemp, env) <- State.get
   State.put (b, envs, envTemp, env)
+
+setEnv :: (EnvVal, EnvVal) -> 𝒯 ()
+setEnv (envTemp, env) = do
+  (flag, envs, _, _) <- State.get
+  State.put (flag, envs, envTemp, env)
 
 addRestore :: (EnvVal, EnvVal) -> 𝒯 ()
 addRestore (envTemp', env') = do
@@ -260,20 +266,23 @@ smallStep (Variable x) = do
   (_, _, envTemp, env) <- State.get 
   return $ Right $ find (envTemp `union` env) x
 smallStep (Lambda xs e1) = do
+  (_, _, envTemp, env) <- State.get
   return $ Right $ Function
         (\_ -> error "smallStep: Lambda: impossible case")
         (Lambda xs e1)
+        (envTemp `union` env)
         $ typeFromExpr (Lambda xs e1)
 smallStep (Apply f es) = do
   (_, _, envT, _) <- State.get
   case f of
     Variable x | isJust (maybeFind envT x) -> do
-      let Function _ f' _ = find envT x
+      let Function _ f' envF _ = find envT x
       case f' of
         Lambda xs e1 -> do
           (_, _, envTemp', env') <- State.get
           addRestore (envTemp', env')
           setFlag True
+          setEnv (makeEnv [], envF)
           return $ Left $ Let (Val (head xs) (head es)) e1
         _ -> error "smallStep: Apply: impossible case"
     _ -> do
@@ -438,7 +447,7 @@ subst (Eq e1 e2) env = Eq <$> subst e1 env <*> subst e2 env
 valueToExpr :: Value a -> T (Expr a)
 valueToExpr (AtomVal a) = return $ Atom a
 valueToExpr (BoolVal b) = return $ Bool b
-valueToExpr (Function _ e _) = return e
+valueToExpr (Function _ e _ _) = return e
 valueToExpr (MemoFunction l) = do
   (_, S λ) <- T State.get
   return $ MemoBernoulli $ λ Map.! l
@@ -534,11 +543,12 @@ den (Apply f es) env = do
   fv <- den f env
   vs <- forM es $ \e -> den e env
   case (fv, vs) of
-    (Function f' _ _, _) -> f' (head vs)
+    (Function f' _ _ _, _) -> f' (head vs)
 den (Lambda xs e1) env = do
   return $ Function
       (\arg -> den e1 $ defArgs env (map This xs) [This arg])
       (Lambda xs e1)
+      env
       $ typeFromExpr (Lambda xs e1)
 den (MemoBernoulli θ) _ = do
   f <- freshFnDen θ

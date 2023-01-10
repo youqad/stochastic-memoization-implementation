@@ -255,13 +255,22 @@ exp12 =
     (Let (Val (Id ("x_2", 𝔸)) Fresh) $
       Variable (Id ("x_2", 𝔸)))
 
--- exp13:
-exp13 :: Expr _
+exp13 :: Expr 'TAtom
 exp13 =
     Let 
       (Val (Id ("x", 𝔸)) Fresh) 
       (Lambda [Id ("y", 𝔸)] (Variable (Id ("x", 𝔸))))
     `Apply` [Fresh]
+
+
+-- exp14:
+-- Let (x_1 := If (Flip) then (Fresh) else (Fresh)) in (λx_2. (λx_3. x_2)) `Apply` [x_1] `Apply` [Fresh]
+exp14:: Expr _ 
+exp14 = 
+  Let 
+    (Val (Id ("x_1", 𝔸)) (If Flip Fresh Fresh)) 
+    (Lambda [Id ("x_2", 𝔸)] (Lambda [Id ("x_3", 𝔸)] (Variable (Id ("x_2", 𝔸)))))
+  `Apply` [Variable (Id ("x_1", 𝔸))] `Apply` [Fresh]
 
 
 main :: IO ()
@@ -270,7 +279,7 @@ main = do
   -- exps <- generate (vectorOf 2 (resize 4 arbitrary :: Gen (Exists Expr)))
   -- testSemantics exps
   -- quickCheck prop_semanticsEquivalent
-  let exps = [This exp13]
+  let exps = [This exp14]
   forM_ exps $ \(This e) -> do
     pPrint e
     let T ev1 = bigStepComplete e initEnv
