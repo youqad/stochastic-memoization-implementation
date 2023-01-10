@@ -269,7 +269,10 @@ exp13 =
         (Id ("x_1", Arr 𝔸 𝔸), Id ("x_2", 𝔸))
         (Variable (Id ("x_2", 𝔸)))))
     (Id ("x_1", Arr 𝔸 𝔸), Id ("x_2", 𝔸))
-    (Lambda [Id ("x_4", Arr 𝔸 𝔸)] (Variable (Id ("x_3", MemFn))) `Apply` [Lambda [Id ("x_1", 𝔸)] Fresh])
+    (Let 
+      (Val (Id ("x_3", Arr 𝔹 𝔹)) (Lambda [Id ("x_3", 𝔹)] (Variable (Id ("x_3", 𝔹))))) 
+      (Lambda [Id ("x_4", Arr 𝔸 𝔸)] (Variable (Id ("x_3", Arr 𝔹 𝔹))))) 
+      `Apply` [Lambda [Id ("x_1", 𝔸)] Fresh]
 
 
 main :: IO ()
