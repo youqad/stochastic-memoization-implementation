@@ -45,7 +45,7 @@ data Value :: TType -> Type where
   BoolVal :: Bool -> Value 'TBool
   Function :: (Value a -> T (Value b)) 
     -> Expr ('TArrow '[a] b)
-    -> EnvVal
+    -> (EnvVal, EnvVal)
     -> Typey ('TArrow '[a] b) 
     -> Value ('TArrow '[a] b)
   MemoFunction :: FnLabels -> Value 'TMemoFun

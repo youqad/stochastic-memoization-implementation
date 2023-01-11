@@ -24,6 +24,7 @@ dependencies:
 - probability
 - mtl
 - QuickCheck
+- quickcheck-with-counterexamples
 - pretty
 - pretty-simple
 

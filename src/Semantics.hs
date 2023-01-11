@@ -113,7 +113,7 @@ bigStep (Lambda xs e1) env = do
       -- (bigStep e1 . defArgs env (map This xs) . map This)
       (\arg -> bigStep e1 $ defArgs env (map This xs) [This arg])
       (Lambda xs e1)
-      env
+      (makeEnv [], env)
       $ typeFromExpr (Lambda xs e1)
 bigStep (Apply f es) env = do
   fv <- bigStep f env
@@ -256,7 +256,7 @@ smallStep (Match e1 (x1, x2) e2) = do
     Left e1'' -> do
       return $ Left $ Match e1'' (x1, x2) e2
     Right (PairVal v1 v2 _) -> do
-      (flag, toBeRestored, envTemp, env) <- State.get
+      (_, toBeRestored, envTemp, env) <- State.get
       let ids = [This x1, This x2]
           vs = [This v1, This v2]
           env' = defArgs env ids vs
@@ -270,21 +270,36 @@ smallStep (Lambda xs e1) = do
   return $ Right $ Function
         (\_ -> error "smallStep: Lambda: impossible case")
         (Lambda xs e1)
-        (envTemp `union` env)
+        (envTemp, env)
         $ typeFromExpr (Lambda xs e1)
 smallStep (Apply f es) = do
   (_, _, envT, _) <- State.get
   case f of
     Variable x | isJust (maybeFind envT x) -> do
-      let Function _ f' envF _ = find envT x
-      case f' of
-        Lambda xs e1 -> do
-          (_, _, envTemp', env') <- State.get
-          addRestore (envTemp', env')
+      (flag, _, envTemp, env) <- State.get
+      unless flag $ addRestore (envTemp, env)
+      setFlag False
+      es' <- forM es $ \e -> smallStep e
+      case head es' of
+        Left e' -> do
           setFlag True
-          setEnv (makeEnv [], envF)
-          return $ Left $ Let (Val (head xs) (head es)) e1
-        _ -> error "smallStep: Apply: impossible case"
+          return $ Left $ Apply (Variable x) (e' : tail es)
+        Right v' -> do
+          restoreEnv
+          let Function _ f' (envTempF, envF) _ = find envT x
+          case f' of
+            Lambda xs e1 -> do
+              (_, _, envTemp', env') <- State.get
+              addRestore (envTemp', env')
+              let varName = "xLambdaTemp_" ++ show (Environment.length envF + 1)
+                  ident = Id (varName, typeFromVal v')
+                  envTemp'' = define (envTempF `union` envTemp') ident v'
+                  -- envTemp'' = makeEnv [(ident, v')]
+                  env'' = define (envF `union` env') (head xs) v'
+              setFlag False
+              setEnv (envTemp'', env'')
+              return $ Left $ Let (Val (head xs) (Variable ident)) e1
+            _ -> error "smallStep: Apply: impossible case"
     _ -> do
       (flag, _, envTemp, env) <- State.get
       unless flag $ addRestore (envTemp, env)
@@ -353,34 +368,15 @@ smallStep (Let (Val x e1) e2) = do
           restoreEnv
           return $ Right v
     _ -> do
-      flag <- getFlag
-      setFlag False
       e1' <- smallStep e1
       case e1' of
         Left e1'' -> do
-          setFlag flag
           return $ Left $ Let (Val x e1'') e2
         Right v -> do
-          if flag
-            then do
-              -- e2 is the body of a λ-abstraction, 
-              -- so we need to restore the environments later.
-              -- Store the value in a temporary variable
-              restoreEnv
-              (_, envs, envTemp, env) <- State.get
-              addRestore (envTemp, env)
-              let varName = "xLambdaTemp_" ++ show (Environment.length envTemp 
-                          + Environment.length env + 1)
-                  ident = Id (varName, typeFromVal v)
-                  envTemp' = define envTemp ident v
-                  env' = define env x v
-              State.put (False, envs, envTemp', env')
-              return $ Left $ Let (Val x (Variable ident)) e2
-            else do
-              (_, envs, envTemp, env) <- State.get
-              let env' = define env x v
-              State.put (flag, envs, envTemp, env')
-              return $ Left e2
+          (_, envs, envTemp, env) <- State.get
+          let env' = define env x v
+          State.put (False, envs, envTemp, env')
+          return $ Left e2
 smallStep (Sequence e1 e2) = do
   e1' <- smallStep e1
   case e1' of
@@ -481,6 +477,17 @@ smallStepIterate n expr env = do
 smallStepIterated :: Expr a -> EnvVal -> T (Value a)
 smallStepIterated expr env = do 
   let s0 = (False, Nothing, makeEnv [], env)
+  smallStepIt expr s0
+  where 
+    smallStepIt e s = do
+      (e', s') <- State.runStateT (smallStep e) s
+      case e' of
+        Left e'' -> smallStepIt e'' s'
+        Right v -> return v
+
+smallStepIteratedDebug :: Expr a -> EnvVal -> T (Value a)
+smallStepIteratedDebug expr env = do 
+  let s0 = (False, Nothing, makeEnv [], env)
   traceM $ "Step 0: \n" ++ show expr ++ "\n " ++ show s0 ++ "\n\n"
   smallStepIt 1 expr s0
   where 
@@ -554,7 +561,7 @@ den (Lambda xs e1) env = do
   return $ Function
       (\arg -> den e1 $ defArgs env (map This xs) [This arg])
       (Lambda xs e1)
-      env
+      (makeEnv [], env)
       $ typeFromExpr (Lambda xs e1)
 den (MemoBernoulli θ) _ = do
   f <- freshFnDen θ
