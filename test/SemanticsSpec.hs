@@ -28,6 +28,7 @@ spec = do
         $ prop "is equivalent to small-step semantics" $ \(This expr) ->
           let bigStepResult = run bigStepComplete expr
               smallStepResult = run smallStepIteratedComplete expr in
-          (Dist.pretty show bigStepResult ++ "\n  |bigStep| ≠ |smallStep| \n\n" ++ Dist.pretty show smallStepResult) 
+          (Dist.pretty show bigStepResult ++ "\n  |bigStep| ≠ |smallStep| \n\n" ++ Dist.pretty show smallStepResult ++ "\n\n" 
+          ++ Dist.pretty show (run smallStepIteratedDebug expr)) 
           `counterexample` 
           approx'' bigStepResult smallStepResult

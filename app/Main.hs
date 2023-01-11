@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, ExtendedDefaultRules, TypeFamilies, ConstraintKinds, FlexibleContexts, AllowAmbiguousTypes, GADTs, DataKinds, PolyKinds, RankNTypes, PartialTypeSignatures, UndecidableInstances, DerivingVia, FlexibleInstances #-}
+{-# LANGUAGE ScopedTypeVariables, ExtendedDefaultRules, TypeFamilies, ConstraintKinds, FlexibleContexts, AllowAmbiguousTypes, GADTs, DataKinds, PolyKinds, RankNTypes, PartialTypeSignatures, UndecidableInstances, DerivingVia, FlexibleInstances, TypeOperators #-}
 
 module Main where
 
@@ -9,7 +9,7 @@ import Control.Monad (forM_)
 import qualified Numeric.Probability.Distribution as Dist
 import qualified Control.Monad.State as State
 
-import Test.QuickCheck
+import Test.QuickCheck.Counterexamples
 -- import System.IO.Unsafe (unsafePerformIO)
 import Text.Pretty.Simple (pPrint, pPrintString)
 
@@ -127,22 +127,22 @@ exp9 =
   (Lambda [Id ("x_1", 𝔸)] Fresh)
 
 
-prop_semanticsEquivalent :: Property
-prop_semanticsEquivalent =
-  forAll (resize 4 arbitrary :: Gen (Exists Expr)) $ \(This expr) ->
-      let bigStepResult = run bigStepComplete expr
-          denResult = run den expr
-          smallStepResult = run smallStepIteratedComplete expr
-      in
-      -- test that the two semantics agree on the distribution with @approx'@,
-      -- and if they don't, display the two distributions
-      counterexample 
-        (Dist.pretty show bigStepResult ++ "\n  |bigStep| ≠ |denotational| \n\n" ++ Dist.pretty show denResult) 
-        (approx' bigStepResult denResult)
-      .&&. 
-      counterexample 
-        (Dist.pretty show bigStepResult ++ "\n  |bigStep| ≠ |smallStep| \n\n" ++ Dist.pretty show smallStepResult) 
-        (approx' bigStepResult smallStepResult)
+-- prop_semanticsEquivalent :: Property
+-- prop_semanticsEquivalent =
+--   forAll (resize 4 arbitrary :: Gen (Exists Expr)) $ \(This expr) ->
+--       let bigStepResult = run bigStepComplete expr
+--           denResult = run den expr
+--           smallStepResult = run smallStepIteratedComplete expr
+--       in
+--       -- test that the two semantics agree on the distribution with @approx''@,
+--       -- and if they don't, display the two distributions
+--       counterexample 
+--         (Dist.pretty show bigStepResult ++ "\n  |bigStep| ≠ |denotational| \n\n" ++ Dist.pretty show denResult) 
+--         (approx'' bigStepResult denResult)
+--       .&&. 
+--       counterexample 
+--         (Dist.pretty show bigStepResult ++ "\n  |bigStep| ≠ |smallStep| \n\n" ++ Dist.pretty show smallStepResult) 
+--         (approx'' bigStepResult smallStepResult)
 
 -- QuickCheck to test equivalence of the various semantics
 -- prop_semantics :: Expr a -> Property
@@ -255,20 +255,91 @@ exp12 =
     (Let (Val (Id ("x_2", 𝔸)) Fresh) $
       Variable (Id ("x_2", 𝔸)))
 
+exp13 :: Expr 'TAtom
+exp13 =
+    Let 
+      (Val (Id ("x", 𝔸)) Fresh) 
+      (Lambda [Id ("y", 𝔸)] (Variable (Id ("x", 𝔸))))
+    `Apply` [Fresh]
 
-main :: IO ()
-main = do
-  -- let exps = [This exp8, This exp2, This exp3, This exp4]
-  -- exps <- generate (vectorOf 2 (resize 4 arbitrary :: Gen (Exists Expr)))
-  -- testSemantics exps
-  -- quickCheck prop_semanticsEquivalent
-  let exps = [This exp11']
+
+-- exp14:
+exp14:: Expr 'TAtom
+exp14 = 
+  Lambda [Id ("x_1", 𝔸)] (Lambda [Id ("x_2", Arr 𝔸 𝔸)] (Variable (Id ("x_1", 𝔸))))
+  `Apply` [Fresh]
+  `Apply` [Let (Val (Id ("x_3", 𝔹)) (Bool True)) $ Lambda [Id ("x_4", 𝔸)] (Variable (Id ("x_4", 𝔸)))]
+
+-- exp15 =
+-- (λx_1. (λx_2. x_1)) `Apply` [MemoBernoulli 0.42] `Apply` [(λx_1. Flip) `Apply` [MemoBernoulli 0.64]]
+exp15 :: Expr 'TMemoFun
+exp15 = 
+  Lambda [Id ("x_1", MemFn)] (Lambda [Id ("x_2", 𝔹)] (Variable (Id ("x_1", MemFn))))
+  `Apply` [MemoBernoulli 0.42]
+  `Apply` [Lambda [Id ("x_1", MemFn)] Flip `Apply` [MemoBernoulli 0.64]]
+
+-- exp16 =
+-- (λx_1. x_1 `Apply` [Flip]) `Apply` [(λx_1. Fresh)]
+exp16:: Expr 'TAtom
+exp16 =
+  Lambda [Id ("x_1", Arr 𝔹 𝔸)] (Variable (Id ("x_1", Arr 𝔹 𝔸)) `Apply` [Flip])
+  `Apply` [Lambda [Id ("x_1", 𝔹)] Fresh]
+
+-- exp17 =
+exp17 :: Expr 'TAtom
+exp17 =
+  If (Bool False)
+    (Lambda [Id ("x_1", Arr 𝔸 𝔸)] Fresh)
+    (Lambda [Id ("x_1", Arr 𝔸 𝔸)] Fresh) `Apply` [Lambda [Id ("x_1", Arr 𝔸 𝔸)] (Variable (Id ("x_1", Arr 𝔸 𝔸))) `Apply` [Lambda [Id ("x_1", 𝔸)] (Variable (Id ("x_1", 𝔸)))]]
+
+-- exp18 =
+-- Let (x_1 := Let (x_1 := (λx_1. x_1)) in (λx_2. x_2) `Apply` [(λx_2. Fresh)]) in (Fresh) == (x_1 `Apply` [Flip])
+exp18 :: Expr 'TBool
+exp18 = 
+  Let (Val 
+    (Id ("x_1", Arr 𝔹 𝔸)) 
+    (Let (Val 
+      (Id ("x_1", Arr 𝔸 𝔸)) 
+      (Lambda [Id ("x_1", 𝔸)] (Variable (Id ("x_1", 𝔸))))) 
+      (Lambda [Id ("x_2", Arr 𝔹 𝔸)] (Variable (Id ("x_2", Arr 𝔹 𝔸))) `Apply` [Lambda [Id ("x_2", 𝔹)] Fresh]))) $
+    Fresh `Eq` (Variable (Id ("x_1", Arr 𝔹 𝔸)) `Apply` [Flip])
+
+
+prop_smallStep :: PropertyOf (Exists Expr :&: (Exists Expr :&: ()))
+prop_smallStep =
+  forAll (resize 5 arbitrary :: Gen (Exists Expr)) $ \(This expr) ->
+  let bigStepResult = run bigStepComplete expr
+      smallStepResult = run smallStepIteratedComplete expr
+  in typedCounterexample 
+      (This expr)
+      $ approx'' bigStepResult smallStepResult === True
+
+testExps :: Foldable t => t (Exists Expr) -> IO ()
+testExps exps = do
   forM_ exps $ \(This e) -> do
     pPrint e
     let T ev1 = bigStepComplete e initEnv
-        T ev2 = smallStepIteratedComplete e initEnv
+        T ev2 = smallStepIteratedDebug e initEnv
         res1 = Dist.norm $ Dist.norm $ simplify' <$> State.runStateT ev1 (initMem, S Map.empty)
         res2 = Dist.norm $ Dist.norm $ simplify' <$> State.runStateT ev2 (initMem, S Map.empty)
     putStrLn $ "bigStepComplete: \n" ++ Dist.pretty show res1
-    putStrLn $ "smallStepIteratedComplete: \n" ++ Dist.pretty show res2
+    putStrLn $ "smallStepIterated: \n" ++ Dist.pretty show res2
     putStrLn "______________________________________________"
+
+quickCheckSmallStep :: IO ()
+quickCheckSmallStep = do
+  Just (This e :&: _) <- quickCheckWith 
+    (stdArgs {maxSuccess = 2000, maxSize = 8}) 
+    prop_smallStep
+  let T ev = smallStepIteratedDebug e initEnv
+      res = Dist.norm $ Dist.norm $ simplify' <$> State.runStateT ev (initMem, S Map.empty)
+  putStrLn $ "smallStepIteratedDebug: \n" ++ Dist.pretty show res
+
+main :: IO ()
+main = do
+  let exps = [This exp18]
+  testExps exps
+  -- let exps = [This exp8, This exp2, This exp3, This exp4]
+  -- exps <- generate (vectorOf 2 (resize 4 arbitrary :: Gen (Exists Expr)))
+  -- testSemantics exps
+

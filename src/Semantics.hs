@@ -12,7 +12,7 @@ import Control.Monad (forM_, unless, forM, foldM)
 import qualified Numeric.Probability.Distribution as Dist
 import qualified Control.Monad.State as State
 -- import qualified Control.Monad.Trans.State.Strict as State
--- import Debug.Trace (trace, traceM)
+import Debug.Trace (trace, traceM)
 
 import Syntax
 import Environment
@@ -113,12 +113,13 @@ bigStep (Lambda xs e1) env = do
       -- (bigStep e1 . defArgs env (map This xs) . map This)
       (\arg -> bigStep e1 $ defArgs env (map This xs) [This arg])
       (Lambda xs e1)
+      (makeEnv [], env)
       $ typeFromExpr (Lambda xs e1)
 bigStep (Apply f es) env = do
   fv <- bigStep f env
   vs <- forM es $ \e -> bigStep e env
   case (fv, vs) of
-    (Function f' _ _, _) -> f' (head vs)
+    (Function f' _ _ _, _) -> f' (head vs)
 bigStep (MemoBernoulli θ) _ = do
   f <- freshFnOpSem θ
   return $ MemoFunction f
@@ -179,6 +180,11 @@ setFlag :: Bool -> 𝒯 ()
 setFlag b = do
   (_, envs, envTemp, env) <- State.get
   State.put (b, envs, envTemp, env)
+
+setEnv :: (EnvVal, EnvVal) -> 𝒯 ()
+setEnv (envTemp, env) = do
+  (flag, envs, _, _) <- State.get
+  State.put (flag, envs, envTemp, env)
 
 addRestore :: (EnvVal, EnvVal) -> 𝒯 ()
 addRestore (envTemp', env') = do
@@ -250,21 +256,21 @@ smallStep (Match e1 (x1, x2) e2) = do
     Left e1'' -> do
       return $ Left $ Match e1'' (x1, x2) e2
     Right (PairVal v1 v2 _) -> do
-      (flag, toBeRestored, envTemp, env) <- State.get
+      (_, toBeRestored, envTemp, env) <- State.get
       let ids = [This x1, This x2]
           vs = [This v1, This v2]
           env' = defArgs env ids vs
-      State.put (flag, toBeRestored, envTemp, env')
+      State.put (False, toBeRestored, envTemp, env')
       return $ Left e2
 smallStep (Variable x) = do
   (_, _, envTemp, env) <- State.get 
   return $ Right $ find (envTemp `union` env) x
 smallStep (Lambda xs e1) = do
   (_, _, envTemp, env) <- State.get
-  let env' = envTemp `union` env
   return $ Right $ Function
-        (\arg -> bigStep e1 $ defArgs env' (map This xs) [This arg])
+        (\_ -> error "smallStep: Lambda: impossible case")
         (Lambda xs e1)
+        (envTemp, env)
         $ typeFromExpr (Lambda xs e1)
 smallStep (Apply f es) = do
   (_, _, envT, _) <- State.get
@@ -277,12 +283,23 @@ smallStep (Apply f es) = do
       case head es' of
         Left e' -> do
           setFlag True
-          return $ Left $ Apply (Variable x) (e':tail es)
-        Right v -> do
+          return $ Left $ Apply (Variable x) (e' : tail es)
+        Right v' -> do
           restoreEnv
-          let Function f' _ _ = find (envTemp `union` env) x
-          res <- State.lift $ f' v 
-          return $ Right res
+          let Function _ f' (envTempF, envF) _ = find envT x
+          case f' of
+            Lambda xs e1 -> do
+              (_, _, envTemp', env') <- State.get
+              addRestore (envTemp', env')
+              let varName = "xLambdaTemp_" ++ show (Environment.length envF + 1)
+                  ident = Id (varName, typeFromVal v')
+                  envTemp'' = define (envTempF `union` envTemp') ident v'
+                  -- envTemp'' = makeEnv [(ident, v')]
+                  env'' = define (envF `union` env') (head xs) v'
+              setFlag False
+              setEnv (envTemp'', env'')
+              return $ Left $ Let (Val (head xs) (Variable ident)) e1
+            _ -> error "smallStep: Apply: impossible case"
     _ -> do
       (flag, _, envTemp, env) <- State.get
       unless flag $ addRestore (envTemp, env)
@@ -340,15 +357,26 @@ smallStep (MemoApply f e) = do
           State.put (False, envs', envTemp'', env')
           return $ Left $ MemoApply (Variable ident) e
 smallStep (Let (Val x e1) e2) = do
-  e1' <- smallStep e1
-  case e1' of
-    Left e1'' -> do
-      return $ Left $ Let (Val x e1'') e2
-    Right v -> do
-      (flag, envs, envTemp, env) <- State.get
-      let env' = define env x v
-      State.put (flag, envs, envTemp, env')
-      return $ Left e2
+  (_, _, envT, _) <- State.get
+  case e1 of
+    Variable y | isJust (maybeFind envT y) -> do
+      e2' <- smallStep e2
+      case e2' of
+        Left e2'' -> do
+          return $ Left $ Let (Val x e1) e2''
+        Right v -> do 
+          restoreEnv
+          return $ Right v
+    _ -> do
+      e1' <- smallStep e1
+      case e1' of
+        Left e1'' -> do
+          return $ Left $ Let (Val x e1'') e2
+        Right v -> do
+          (_, envs, envTemp, env) <- State.get
+          let env' = define env x v
+          State.put (False, envs, envTemp, env')
+          return $ Left e2
 smallStep (Sequence e1 e2) = do
   e1' <- smallStep e1
   case e1' of
@@ -421,7 +449,7 @@ subst (Eq e1 e2) env = Eq <$> subst e1 env <*> subst e2 env
 valueToExpr :: Value a -> T (Expr a)
 valueToExpr (AtomVal a) = return $ Atom a
 valueToExpr (BoolVal b) = return $ Bool b
-valueToExpr (Function _ e _) = return e
+valueToExpr (Function _ e _ _) = return e
 valueToExpr (MemoFunction l) = do
   (_, S λ) <- T State.get
   return $ MemoBernoulli $ λ Map.! l
@@ -429,7 +457,8 @@ valueToExpr (PairVal a b _) = (Pair <$> valueToExpr a) <*> valueToExpr b
 
 -- | Transitive closure of small step semantics
 
-smallStepIterate :: Int -> Expr a -> EnvVal -> T (ExprOrValue a, _)
+smallStepIterate :: Int -> Expr a -> EnvVal 
+  -> T (ExprOrValue a, (Flag, Maybe [(EnvVal, EnvVal)], EnvVal, EnvVal))
 smallStepIterate n expr env = do
   let s0 = (False, Nothing, makeEnv [], env)
   smallStepIterate' n expr s0
@@ -448,14 +477,25 @@ smallStepIterate n expr env = do
 smallStepIterated :: Expr a -> EnvVal -> T (Value a)
 smallStepIterated expr env = do 
   let s0 = (False, Nothing, makeEnv [], env)
-  -- traceM $ "Step 0: \n" ++ show expr ++ "\n " ++ show s0 ++ "\n\n"
   smallStepIt expr s0
   where 
     smallStepIt e s = do
       (e', s') <- State.runStateT (smallStep e) s
-      -- traceM $ "Step " ++ show i ++ ": \n" ++ show e' ++ "\n " ++ show s' ++ "\n\n"
       case e' of
         Left e'' -> smallStepIt e'' s'
+        Right v -> return v
+
+smallStepIteratedDebug :: Expr a -> EnvVal -> T (Value a)
+smallStepIteratedDebug expr env = do 
+  let s0 = (False, Nothing, makeEnv [], env)
+  traceM $ "Step 0: \n" ++ show expr ++ "\n " ++ show s0 ++ "\n\n"
+  smallStepIt 1 expr s0
+  where 
+    smallStepIt (i :: Int) e s = do
+      (e', s') <- State.runStateT (smallStep e) s
+      traceM $ "Step " ++ show i ++ ": \n" ++ show e' ++ "\n " ++ show s' ++ "\n\n"
+      case e' of
+        Left e'' -> smallStepIt (i+1) e'' s'
         Right v -> return v
 
 smallStepIteratedComplete :: Expr a -> EnvVal -> T (Value a)
@@ -516,11 +556,12 @@ den (Apply f es) env = do
   fv <- den f env
   vs <- forM es $ \e -> den e env
   case (fv, vs) of
-    (Function f' _ _, _) -> f' (head vs)
+    (Function f' _ _ _, _) -> f' (head vs)
 den (Lambda xs e1) env = do
   return $ Function
       (\arg -> den e1 $ defArgs env (map This xs) [This arg])
       (Lambda xs e1)
+      (makeEnv [], env)
       $ typeFromExpr (Lambda xs e1)
 den (MemoBernoulli θ) _ = do
   f <- freshFnDen θ

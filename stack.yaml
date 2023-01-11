@@ -44,6 +44,7 @@ extra-deps:
     subdirs:
       - inline-c
       - inline-c-cpp
+  - quickcheck-with-counterexamples-1.2
 extra-include-dirs:
   - libtorch/include/torch/csrc/api/include
   - libtorch/include
