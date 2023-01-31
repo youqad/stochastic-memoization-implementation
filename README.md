@@ -1,6 +1,6 @@
 # Mini Stochastic Memoization Language
 
-This project implements a mini probabilistic language in Haskell, with fresh name generation of atoms (cf. Pitt's nominal sets) and stochastic memoization of constant Bernoulli functions, by updating a bipartite graph (acting as a memoization table). 
+This project implements a mini probabilistic language in Haskell, with fresh name generation of atoms (cf. Pitt's nominal sets) and stochastic memoization of constant Bernoulli functions, by updating a bipartite graph (which plays the role of a memoization table). 
 
 To bypass Haskell's default type-system limitations, we used a trick with singleton GADTs (mentioned, e.g. here: https://homepages.inf.ed.ac.uk/slindley/papers/hasochism.pdf) to implement a fragment of dependent types, which enabled us to get "sound by construction" (big-step, small-step operational, and denotational) semantics. 
 
