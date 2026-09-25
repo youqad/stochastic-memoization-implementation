@@ -35,7 +35,6 @@ library
       QuickCheck
     , base >=4.7
     , containers
-    , hasktorch
     , mtl
     , pretty
     , pretty-simple
@@ -55,7 +54,6 @@ executable minimemo-exe
       QuickCheck
     , base >=4.7
     , containers
-    , hasktorch
     , minimemo
     , mtl
     , pretty
@@ -78,7 +76,6 @@ test-suite minimemo-test
       QuickCheck
     , base >=4.7
     , containers
-    , hasktorch
     , hspec
     , minimemo
     , mtl

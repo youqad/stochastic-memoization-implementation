@@ -33,24 +33,7 @@ packages:
 - .
 
 extra-deps:
-  - github: hasktorch/hasktorch
-    commit: a31ef707927cd70ea9283e3b10f2270ef3e2935a
-    subdirs:
-      - hasktorch
-      - libtorch-ffi
-      - libtorch-ffi-helper
-  - git: https://github.com/fpco/inline-c
-    commit: 2d0fe9b2f0aa0e1aefc7bfed95a501e59486afb0
-    subdirs:
-      - inline-c
-      - inline-c-cpp
   - quickcheck-with-counterexamples-1.2
-extra-include-dirs:
-  - libtorch/include/torch/csrc/api/include
-  - libtorch/include
-
-extra-lib-dirs:
-  - ./libtorch/lib
 
 # Dependency packages to be pulled from upstream that are not in the resolver.
 # These entries can reference officially published versions as well as
