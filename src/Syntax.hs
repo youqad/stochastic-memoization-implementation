@@ -89,8 +89,8 @@ data Expr :: TType -> Type where
   Pair :: Expr a -> Expr b -> Expr ('TProduct a b)
   Match :: Expr ('TProduct a b) -> (Ident a, Ident b) -> Expr c -> Expr c
   Variable :: Ident a -> Expr a
-  Lambda :: [Ident a] -> Expr b -> Expr ('TArrow '[a] b)
-  Apply :: Expr ('TArrow '[a] b) -> [Expr a] -> Expr b
+  Lambda :: Ident a -> Expr b -> Expr ('TArrow '[a] b)
+  Apply :: Expr ('TArrow '[a] b) -> Expr a -> Expr b
   MemoBernoulli :: Double -> Expr 'TMemoFun -- Expr (TArrow '[TAtom] TBool)
   MemoApply :: Expr 'TMemoFun -> Expr 'TAtom -> Expr 'TBool
   Eq  :: Expr a -> Expr a -> Expr 'TBool
@@ -102,7 +102,7 @@ data Expr :: TType -> Type where
 instance Show (Expr a) where
   show = render . ppExpr
     where
-    ppExpr :: Expr a -> Doc
+    ppExpr :: forall b. Expr b -> Doc
     ppExpr (Atom a) = text $ show a
     ppExpr (Bool b) = text $ show b
     ppExpr (If e1 e2 e3) = text "If" <+> parens (ppExpr (unsafeCoerce e1)) <+> text "then" <+> parens (ppExpr e2) <+> text "else" <+> parens (ppExpr e3)
@@ -113,9 +113,8 @@ instance Show (Expr a) where
         <+> text "->" 
         <+> parens (ppExpr e')
     ppExpr (Variable (Id (x, _))) = text x
-    ppExpr (Lambda [] e) = ppExpr (unsafeCoerce e)
-    ppExpr (Lambda (Id (x, _):xs) e) = parens (text "λ" Text.PrettyPrint.<> text x Text.PrettyPrint.<> text "." <+> ppExpr (Lambda xs e))
-    ppExpr (Apply e1 e2) = ppExpr (unsafeCoerce e1) <+> text "`Apply`" <+> brackets (hsep (map ppExpr (unsafeCoerce e2)))
+    ppExpr (Lambda (Id (x, _)) e) = parens (text "λ" Text.PrettyPrint.<> text x Text.PrettyPrint.<> text "." <+> ppExpr e)
+    ppExpr (Apply e1 e2) = ppExpr e1 <+> text "`Apply`" <+> parens (ppExpr e2)
     ppExpr (MemoBernoulli p) = text "MemoBernoulli" <+> text (show p)
     ppExpr (MemoApply e1 e2) = ppExpr (unsafeCoerce e1) <+> text "`MemoApply`" <+> parens (ppExpr (unsafeCoerce e2))
     ppExpr (Eq e1 e2) = parens (ppExpr (unsafeCoerce e1)) <+> text "==" <+> parens (ppExpr (unsafeCoerce e2))
@@ -124,7 +123,7 @@ instance Show (Expr a) where
     ppExpr Fresh = text "Fresh"
     ppExpr Flip = text "Flip"
 
-    ppDefn :: Defn a -> Doc
+    ppDefn :: forall b. Defn b -> Doc
     ppDefn (Val (Id (x, _)) e) = text x <+> text ":=" <+> ppExpr e
 
     
@@ -171,7 +170,7 @@ instance Arbitrary (Exists Expr) where
           ++ [do
                 let s1 = "x_" ++ show (List.length ls + 1)
                 This this2 <- arbExpr (This (Id (s1, a)):ls) (Just b) (n `div` 2)
-                return $ This $ Lambda [Id (s1, a)] (unsafeCoerce this2)
+                return $ This $ Lambda (Id (s1, a)) (unsafeCoerce this2)
               ]
         Nothing -> oneof $ listOfPossibilitiesContext ls t n
           ++ listOfPossibilitiesBase ls t
@@ -188,7 +187,7 @@ instance Arbitrary (Exists Expr) where
           , do
               let s1 = "x_" ++ show (List.length ls + 1)
               This this2 <- arbExpr (This (Id (s1, 𝔸)):ls) (Just 𝔹) (n `div` 2)
-              return $ This $ Lambda [Id (s1, 𝔸)] (unsafeCoerce this2)
+              return $ This $ Lambda (Id (s1, 𝔸)) (unsafeCoerce this2)
           , do
               This this1 <- arbExpr ls (Just 𝔸) (n `div` 2)
               This this2 <- arbExpr ls (Just 𝔸) (n `div` 2)
@@ -214,7 +213,7 @@ instance Arbitrary (Exists Expr) where
               Arr a b -> [do
                   let s1 = "x_" ++ show (List.length listVariables + 1)
                   This this2 <- arbExpr (This (Id (s1, a)):listVariables) (Just b) 0
-                  return $ This $ Lambda [Id (s1, a)] (unsafeCoerce this2)
+                  return $ This $ Lambda (Id (s1, a)) (unsafeCoerce this2)
                 ]
             _ -> resList
         Nothing -> [return $ This Fresh, return $ This Flip
@@ -247,7 +246,7 @@ instance Arbitrary (Exists Expr) where
             let t0 = fromMaybe t2 (unsafeCoerce t)
             This this1 <- arbExpr ls (Just (Arr t1 t0)) (n `div` 2)
             This this2 <- arbExpr ls (Just t1) (n `div` 2)
-            return $ This $ Apply (unsafeCoerce this1) [this2]
+            return $ This $ Apply (unsafeCoerce this1) (unsafeCoerce this2)
         , do -- Let construct
             let s1 = "x_" ++ show (List.length ls + 1)
             This t1 <- elements baseTypes

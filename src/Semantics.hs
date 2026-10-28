@@ -4,15 +4,15 @@ module Semantics where
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import Data.List (partition)
 
 import Data.Maybe (fromJust, isJust)
-import Control.Monad (forM_, unless, forM, foldM)
+import Data.Type.Equality ((:~:)(Refl), testEquality)
+import Control.Monad (forM_, forM, unless, foldM)
 
 import qualified Numeric.Probability.Distribution as Dist
 import qualified Control.Monad.State as State
 -- import qualified Control.Monad.Trans.State.Strict as State
-import Debug.Trace (trace, traceM)
+import Debug.Trace (traceM)
 
 import Syntax
 import Environment
@@ -23,36 +23,28 @@ import Values
 -- | PROBABILITY DISTRIBUTIONS
 ------------------------
 
-bernoulli :: Num prob => prob -> Dist.T prob Bool
-bernoulli θ = Dist.choose θ True False
+validateBias :: RealFloat prob => prob -> ()
+validateBias p
+  | isNaN p || isInfinite p || p < 0 || p > 1 =
+      error "Bernoulli bias must be finite and in [0,1]"
+  | otherwise = ()
 
--- | More permissive version of `approx`:
-approx' :: (RealFloat prob, Ord a) =>
-  Dist.T prob a -> Dist.T prob a -> Bool
-approx' (Dist.Cons xs) (Dist.Cons ys) =
-  let (xse, xsp) = unzip (Dist.norm' xs)
-      (yse, ysp) = unzip (Dist.norm' ys)
-  in  xse == yse &&
-      all (\p -> abs p < 1e-2) (zipWith (-) xsp ysp)
+bernoulli :: RealFloat prob => prob -> Dist.T prob Bool
+bernoulli θ = validateBias θ `seq`
+  if θ == 0 then return False
+  else if θ == 1 then return True
+  else Dist.choose θ True False
 
-forcedGrouping :: (Eq a, Num b) => [(a, b)] -> [(a, b)]
-forcedGrouping ls = case ls of
-  [] -> []
-  ((x, p):xs) -> 
-    let (xs', notxs') = partition ((== x) . fst) xs
-        p' = sum $ p : map snd xs' in
-    (x, p') : forcedGrouping notxs'
-
--- | @approx''@ = @approx'@, but with forced grouping in case @Dist.norm'@ didn't group all values.
+-- Compare normalized outcomes with the original strict per-entry tolerance.
+-- Observation and state keys have lawful total orders, so the distribution
+-- library performs all grouping and sorting.
 approx'' :: (RealFloat prob, Ord a) =>
   Dist.T prob a -> Dist.T prob a -> Bool
-approx'' dist1@(Dist.Cons xs) dist2@(Dist.Cons ys) =
-  approx' dist1 dist2 || 
-  (let
-    (xse, xsp) = unzip (forcedGrouping (Dist.norm' xs))
-    (yse, ysp) = unzip (forcedGrouping (Dist.norm' ys)) in
-    xse == yse
-      && all (\ p -> abs p < 1e-2) (zipWith (-) xsp ysp))
+approx'' (Dist.Cons xs) (Dist.Cons ys) =
+  let (xse, xsp) = unzip (Dist.norm' xs)
+      (yse, ysp) = unzip (Dist.norm' ys)
+  in xse == yse &&
+      all (\p -> abs p < 1e-2) (zipWith (-) xsp ysp)
 
 
 ------------------------
@@ -80,12 +72,12 @@ freshAtmOpSem = T $ do
   return r
 
 freshFnOpSem :: Double -> T FnLabels
-freshFnOpSem θ = T $ do
+freshFnOpSem θ = validateBias θ `seq` T (do
   (g, S λ) <- State.get
   let (l, g') = freshLeft g
   let λ' = Map.insert l θ λ
   State.put (g', S λ')
-  return l
+  return l)
 
 
 bigStep :: Expr a -> EnvVal -> T (Value a)
@@ -111,15 +103,15 @@ bigStep (Variable x) env = return $ find env x
 bigStep (Lambda xs e1) env = do
   return $ Function
       -- (bigStep e1 . defArgs env (map This xs) . map This)
-      (\arg -> bigStep e1 $ defArgs env (map This xs) [This arg])
+      (\arg -> bigStep e1 $ define env xs arg)
       (Lambda xs e1)
       (makeEnv [], env)
       $ typeFromExpr (Lambda xs e1)
 bigStep (Apply f es) env = do
   fv <- bigStep f env
-  vs <- forM es $ \e -> bigStep e env
-  case (fv, vs) of
-    (Function f' _ _ _, _) -> f' (head vs)
+  v <- bigStep es env
+  case fv of
+    Function f' _ _ _ -> f' v
 bigStep (MemoBernoulli θ) _ = do
   f <- freshFnOpSem θ
   return $ MemoFunction f
@@ -207,13 +199,19 @@ smallStep :: Expr a -> 𝒯 (ExprOrValue a)
 smallStep (Atom a) = return $ Right $ AtomVal a
 smallStep (Bool b) = return $ Right $ BoolVal b
 smallStep (If e1 e2 e3) = do
+  (flag, _, envTemp, env) <- State.get
+  unless flag $ addRestore (envTemp, env)
+  setFlag False
   e1' <- smallStep e1
   case e1' of
     Left e1'' -> do
+      setFlag True
       return $ Left $ If e1'' e2 e3
     Right (BoolVal True) -> do
+      restoreEnv
       return $ Left e2
     Right (BoolVal False) -> do
+      restoreEnv
       return $ Left e3
 smallStep (Pair e1 e2) = do
   (_, _, envT, _) <- State.get
@@ -268,7 +266,7 @@ smallStep (Variable x) = do
 smallStep (Lambda xs e1) = do
   (_, _, envTemp, env) <- State.get
   return $ Right $ Function
-        (\_ -> error "smallStep: Lambda: impossible case")
+        (\arg -> smallStepIterated e1 $ define (envTemp `union` env) xs arg)
         (Lambda xs e1)
         (envTemp, env)
         $ typeFromExpr (Lambda xs e1)
@@ -279,11 +277,11 @@ smallStep (Apply f es) = do
       (flag, _, envTemp, env) <- State.get
       unless flag $ addRestore (envTemp, env)
       setFlag False
-      es' <- forM es $ \e -> smallStep e
-      case head es' of
+      es' <- smallStep es
+      case es' of
         Left e' -> do
           setFlag True
-          return $ Left $ Apply (Variable x) (e' : tail es)
+          return $ Left $ Apply (Variable x) e'
         Right v' -> do
           restoreEnv
           let Function _ f' (envTempF, envF) _ = find envT x
@@ -295,10 +293,10 @@ smallStep (Apply f es) = do
                   ident = Id (varName, typeFromVal v')
                   envTemp'' = define (envTempF `union` envTemp') ident v'
                   -- envTemp'' = makeEnv [(ident, v')]
-                  env'' = define (envF `union` env') (head xs) v'
+                  env'' = define (envF `union` env') xs v'
               setFlag False
               setEnv (envTemp'', env'')
-              return $ Left $ Let (Val (head xs) (Variable ident)) e1
+              return $ Left $ Let (Val xs (Variable ident)) e1
             _ -> error "smallStep: Apply: impossible case"
     _ -> do
       (flag, _, envTemp, env) <- State.get
@@ -436,7 +434,7 @@ subst (Variable x) env = case maybeFind env x of
   Nothing -> return $ Variable x
   Just v -> valueToExpr v
 subst (Lambda xs e1) env = Lambda xs <$> subst e1 env
-subst (Apply f es) env = Apply <$> subst f env <*> mapM (subst <*> pure env) es
+subst (Apply f e) env = Apply <$> subst f env <*> subst e env
 subst (MemoBernoulli θ) _ = return $ MemoBernoulli θ
 subst (MemoApply f e) env = MemoApply <$> subst f env <*> subst e env
 subst (Let (Val x e) e1) env = Let <$> (Val x <$> subst e env) <*> subst e1 env
@@ -523,7 +521,7 @@ freshAtmDen = T $ do
   return r
 
 freshFnDen :: Double -> T FnLabels
-freshFnDen θ = T $ do
+freshFnDen θ = validateBias θ `seq` T (do
   (g, S λ) <- State.get
   let (l, g'@(Mem ((_, rs), _))) = freshLeft g
   gNew <- State.lift $
@@ -532,7 +530,7 @@ freshFnDen θ = T $ do
     g' rs
   let λ' = Map.insert l θ λ
   State.put (gNew, S λ')
-  return l
+  return l)
 
 den :: Expr a -> EnvVal -> T (Value a)
 den (Atom a) _ = return $ AtomVal a
@@ -554,12 +552,12 @@ den (Match e1 (x1, x2) e2) env = do
 den (Variable x) env = return $ find env x
 den (Apply f es) env = do
   fv <- den f env
-  vs <- forM es $ \e -> den e env
-  case (fv, vs) of
-    (Function f' _ _ _, _) -> f' (head vs)
+  v <- den es env
+  case fv of
+    Function f' _ _ _ -> f' v
 den (Lambda xs e1) env = do
   return $ Function
-      (\arg -> den e1 $ defArgs env (map This xs) [This arg])
+      (\arg -> den e1 $ define env xs arg)
       (Lambda xs e1)
       (makeEnv [], env)
       $ typeFromExpr (Lambda xs e1)
@@ -599,23 +597,87 @@ simplify (b, (Mem ((l, r), m), S λ)) =
     Set.toList r,
     Map.toList m)
 
-simplify' :: (Eq (LeftNode t), Show (LeftNode t)) =>
-  (a, (MemoBigraph (LeftNode t) r b, StateOfBiases t))
-  -> (a, [(LeftNode t, Double)], [r])
-simplify' (b, (Mem ((l, r), _), S λ)) =
-    (b,
-    zipWith (\f (f', θ) ->
-      if f == f' then (f, θ) else error (show f ++ " ≠ " ++ show f'))
-      (Set.toList l) (Map.toList λ),
-    Set.toList r)
+-- These are finite application observations, not extensional function equality.
+-- The result contains no closure syntax or existential environment equality.
+data Observation
+  = ObservedBool Bool
+  | ObservedAtom AtmLabels [(FnLabels, Bool)]
+  | ObservedMemo FnLabels Double [(AtmLabels, Bool)]
+  | ObservedPair Observation Observation
+  | ObservedFunction Int Observation
+  deriving (Eq, Ord, Show)
 
-run :: Ord a => 
-  (e -> EnvVal -> T a)
-  -> e -> Dist (a, [(FnLabels, Double)], [AtmLabels])
+type Evaluator = forall a. Expr a -> EnvVal -> T (Value a)
+
+observeValue :: Evaluator -> Value a -> T Observation
+observeValue _ (BoolVal b) = return $ ObservedBool b
+observeValue _ (AtomVal a) = do
+  (Mem ((functions, _), _), _) <- T State.get
+  column <- forM (Set.toAscList functions) $ \f -> do
+    bit <- getOpSem (f, a)
+    return (f, bit)
+  return $ ObservedAtom a column
+observeValue _ (MemoFunction f) = do
+  (Mem ((_, atoms), _), S biases) <- T State.get
+  row <- forM (Set.toAscList atoms) $ \a -> do
+    bit <- getOpSem (f, a)
+    return (a, bit)
+  return $ ObservedMemo f (biases Map.! f) row
+observeValue sem (PairVal a b _) =
+  ObservedPair <$> observeValue sem a <*> observeValue sem b
+observeValue sem (Function f _ _ (Arr a _)) = do
+  choices <- probeChoices sem a
+  (index, action) <- T $ State.lift $ Dist.uniform $ zip [0..] choices
+  argument <- action
+  result <- f argument >>= observeValue sem
+  return $ ObservedFunction index result
+
+-- Enumerate an exact uniform mixture of labelled application contexts.
+-- Each branch runs one argument in its own state: unrelated probes
+-- must not allocate a Cartesian product of unused memo-table entries.
+-- Atom probes cover allocated atoms and one fresh atom. Memo probes cover
+-- allocated labels and new labels at 0, 1/2 and 1. Products use all pairs;
+-- higher-order arguments use closed constants and the typed identity.
+probeChoices :: Evaluator -> Typey a -> T [T (Value a)]
+probeChoices _ 𝔹 = return $ map return [BoolVal False, BoolVal True]
+probeChoices sem 𝔸 = do
+  (Mem ((_, atoms), _), _) <- T State.get
+  return $ map (return . AtomVal) (Set.toAscList atoms) ++ [sem Fresh initEnv]
+probeChoices sem MemFn = do
+  (Mem ((labels, _), _), _) <- T State.get
+  return $ map (return . MemoFunction) (Set.toAscList labels)
+    ++ map (\p -> sem (MemoBernoulli p) initEnv) [0, 0.5, 1]
+probeChoices sem (Prod a b) = do
+  left <- probeChoices sem a
+  right <- probeChoices sem b
+  return [PairVal <$> x <*> y <*> pure (Prod a b) | x <- left, y <- right]
+probeChoices sem t@(Arr _ _) = return $ map (\e -> sem e initEnv) (closedProbes t)
+
+closedProbes :: Typey a -> [Expr a]
+closedProbes 𝔹 = [Bool False, Bool True]
+closedProbes 𝔸 = [Fresh]
+closedProbes MemFn = map MemoBernoulli [0, 0.5, 1]
+closedProbes (Prod a b) = [Pair x y | x <- closedProbes a, y <- closedProbes b]
+closedProbes (Arr a b) =
+  let x = Id ("observation_argument", a)
+      constants = map (Lambda x) (closedProbes b)
+  in case testEquality a b of
+    Just Refl -> Lambda x (Variable x) : constants
+    Nothing -> constants
+
+type ObservedOutcome =
+  (Observation, [(FnLabels, Double)], [AtmLabels], [((FnLabels, AtmLabels), Bool)])
+
+run :: Evaluator -> Expr a -> Dist ObservedOutcome
 run sem e =
-  let T ev = sem e initEnv
-      res = simplify' <$> State.runStateT ev (initMem, S Map.empty) in
-  Dist.norm res
+  let T ev = do
+        value <- sem e initEnv
+        completeBigraph
+        originalState <- T State.get
+        observation <- observeValue sem value
+        return $ simplify (observation, originalState)
+      res = State.evalStateT ev (initMem, S Map.empty)
+  in Dist.norm res
 
-runSems :: [Expr a -> Dist (Value a, [(FnLabels, Double)], [AtmLabels])]
+runSems :: [Expr a -> Dist ObservedOutcome]
 runSems = [run den, run bigStepComplete, run smallStepIteratedComplete]

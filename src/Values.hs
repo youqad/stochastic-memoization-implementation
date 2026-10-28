@@ -59,11 +59,14 @@ instance Eq (Value a) where
   (PairVal a b _) == (PairVal c d _) = a == c && b == d
 
 instance Ord (Value a) where
-  (AtomVal a) <= (AtomVal b) = a <= b
-  (BoolVal a) <= (BoolVal b) = a <= b
-  (Function {}) <= (Function {}) = False
-  (MemoFunction a) <= (MemoFunction b) = a <= b
-  (PairVal a b _) <= (PairVal c d _) = a <= c && b <= d
+  compare (AtomVal a) (AtomVal b) = compare a b
+  compare (BoolVal a) (BoolVal b) = compare a b
+  compare (Function _ e _ _) (Function _ e' _ _) = compare e e'
+  compare (MemoFunction a) (MemoFunction b) = compare a b
+  compare (PairVal a b _) (PairVal c d _) =
+    case compare a c of
+      EQ -> compare b d
+      ordering -> ordering
 instance Show (Value a) where
   show (AtomVal (Atm a)) = "<atom ++" ++ show a ++ ">"
   show (BoolVal b) = show b
@@ -131,7 +134,7 @@ typeFromExpr (If _ e _) = typeFromExpr e
 typeFromExpr (Pair e1 e2) = Prod (typeFromExpr e1) (typeFromExpr e2)
 typeFromExpr (Match _ _ e) = typeFromExpr e
 typeFromExpr (Variable (Id (_, t))) = t
-typeFromExpr (Lambda xs e) = Arr (typeFromIdent $ head xs) (typeFromExpr e)
+typeFromExpr (Lambda x e) = Arr (typeFromIdent x) (typeFromExpr e)
 typeFromExpr (Apply e _) = case typeFromExpr e of
   Arr _ t -> t
 typeFromExpr (MemoBernoulli _) = MemFn
