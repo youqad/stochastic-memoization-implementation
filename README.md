@@ -2,10 +2,10 @@
 
 This project implements a mini probabilistic language in Haskell, with fresh name generation of atoms (cf. Pitt's nominal sets) and stochastic memoization of constant Bernoulli functions, by updating a bipartite graph (which plays the role of a memoization table). 
 
-To bypass Haskell's default type-system limitations, we used a trick with singleton GADTs (mentioned, e.g. here: https://homepages.inf.ed.ac.uk/slindley/papers/hasochism.pdf) to implement a fragment of dependent types, which enabled us to get "sound by construction" (big-step, small-step operational, and denotational) semantics. 
+To bypass Haskell's default type-system limitations, we used a trick with singleton GADTs (mentioned, e.g. here: https://homepages.inf.ed.ac.uk/slindley/papers/hasochism.pdf): singleton GADTs index expressions by their types. The prototype provides big-step, small-step and denotational-style evaluators; QuickCheck compares their finite observed results. 
 
 ```hs
-smallStep :: Expr a -> EnvVal -> T (ExprOrValue a)
+smallStep :: Expr a -> 𝒯 (ExprOrValue a)
 bigStep :: Expr a -> EnvVal -> T (Value a)
 den :: Expr a -> EnvVal -> T (Value a)
 ```
