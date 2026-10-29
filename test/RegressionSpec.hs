@@ -8,6 +8,7 @@ import qualified Data.List as List
 import qualified Numeric.Probability.Distribution as Dist
 import qualified Control.Monad.State as State
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Syntax
 import Environment
 import Values
@@ -23,9 +24,37 @@ booleanLaw sem e =
 
 spec :: Spec
 spec = do
+  expressionSpec
   orderingSpec
   observationSpec
   biasSpec
+
+expressionSpec :: Spec
+expressionSpec = describe "Expression structure" $ do
+  let namedTrue = Id ("True", 𝔹)
+      literal = Bool True
+      variable = Variable namedTrue
+      constant = Lambda namedTrue literal
+      identity = Lambda namedTrue variable
+  it "distinguishes a literal from an identically printed variable" $ do
+    show literal `shouldBe` show variable
+    (literal == variable) `shouldBe` False
+  it "keeps identically printed expressions distinct in ordered sets" $ do
+    Set.size (Set.fromList [literal, variable]) `shouldBe` 2
+  it "retains the types of existentially hidden identifiers" $ do
+    let boolSequence = Sequence (Variable (Id ("x", 𝔹))) (Bool True)
+        atomSequence = Sequence (Variable (Id ("x", 𝔸))) (Bool True)
+    show boolSequence `shouldBe` show atomSequence
+    (boolSequence == atomSequence) `shouldBe` False
+    compare boolSequence atomSequence `shouldNotBe` EQ
+  let closureCase :: String -> Evaluator -> Spec
+      closureCase name sem = it ("distinguishes colliding closures in " ++ name) $ do
+        booleanLaw sem (Apply constant (Bool False)) `shouldBe` [(True, 1)]
+        booleanLaw sem (Apply identity (Bool False)) `shouldBe` [(False, 1)]
+        booleanLaw sem (Eq constant identity) `shouldBe` [(False, 1)]
+  closureCase "big-step equality" bigStep
+  closureCase "small-step equality" smallStepIterated
+  closureCase "denotational equality" den
 
 orderingSpec :: Spec
 orderingSpec = describe "Value ordering" $ do

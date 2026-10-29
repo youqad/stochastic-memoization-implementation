@@ -127,10 +127,59 @@ instance Show (Expr a) where
     ppDefn (Val (Id (x, _)) e) = text x <+> text ":=" <+> ppExpr e
 
     
+-- Existential operands prevent stock Eq/Ord deriving on Expr. Retain every
+-- constructor and identifier type in an unindexed key so stock deriving applies.
+data ExprKey
+  = AtomKey AtmLabels
+  | BoolKey Bool
+  | IfKey ExprKey ExprKey ExprKey
+  | PairKey ExprKey ExprKey
+  | MatchKey ExprKey (String, TType) (String, TType) ExprKey
+  | VariableKey (String, TType)
+  | LambdaKey (String, TType) ExprKey
+  | ApplyKey ExprKey ExprKey
+  | MemoBernoulliKey Double
+  | MemoApplyKey ExprKey ExprKey
+  | EqKey ExprKey ExprKey
+  | LetKey (String, TType) ExprKey ExprKey
+  | SequenceKey ExprKey ExprKey
+  | FreshKey
+  | FlipKey
+  deriving (Eq, Ord)
+
+typeKey :: Typey a -> TType
+typeKey 𝔹 = TBool
+typeKey 𝔸 = TAtom
+typeKey MemFn = TMemoFun
+typeKey (Prod a b) = TProduct (typeKey a) (typeKey b)
+typeKey (Arr a b) = TArrow [typeKey a] (typeKey b)
+
+identKey :: Ident a -> (String, TType)
+identKey (Id (name, t)) = (name, typeKey t)
+
+exprKey :: Expr a -> ExprKey
+exprKey (Atom a) = AtomKey a
+exprKey (Bool b) = BoolKey b
+exprKey (If guard yes no) = IfKey (exprKey guard) (exprKey yes) (exprKey no)
+exprKey (Pair a b) = PairKey (exprKey a) (exprKey b)
+exprKey (Match pair (x, y) body) =
+  MatchKey (exprKey pair) (identKey x) (identKey y) (exprKey body)
+exprKey (Variable x) = VariableKey (identKey x)
+exprKey (Lambda x body) = LambdaKey (identKey x) (exprKey body)
+exprKey (Apply f a) = ApplyKey (exprKey f) (exprKey a)
+exprKey (MemoBernoulli p) = MemoBernoulliKey p
+exprKey (MemoApply f a) = MemoApplyKey (exprKey f) (exprKey a)
+exprKey (Eq a b) = EqKey (exprKey a) (exprKey b)
+exprKey (Let (Val x value) body) =
+  LetKey (identKey x) (exprKey value) (exprKey body)
+exprKey (Sequence a b) = SequenceKey (exprKey a) (exprKey b)
+exprKey Fresh = FreshKey
+exprKey Flip = FlipKey
+
 instance Eq (Expr a) where
-  (==) = (==) `on` show
+  (==) = (==) `on` exprKey
 instance Ord (Expr a) where
-  compare = compare `on` show
+  compare = compare `on` exprKey
 
 instance Arbitrary (Exists Expr) where 
   arbitrary :: Gen (Exists Expr)
