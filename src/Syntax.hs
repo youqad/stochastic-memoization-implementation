@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, ExtendedDefaultRules, TypeFamilies, ConstraintKinds, FlexibleContexts, AllowAmbiguousTypes, GADTs, DataKinds, PolyKinds, RankNTypes, PartialTypeSignatures, UndecidableInstances, GeneralizedNewtypeDeriving, StandaloneDeriving, DerivingVia, FlexibleInstances, TypeOperators, InstanceSigs #-}
+{-# LANGUAGE GADTs, DataKinds, PolyKinds, StandaloneDeriving, TypeOperators, RankNTypes, FlexibleInstances, UndecidableInstances, GeneralizedNewtypeDeriving, InstanceSigs #-}
 
 module Syntax where
 
@@ -105,10 +105,10 @@ instance Show (Expr a) where
     ppExpr :: forall b. Expr b -> Doc
     ppExpr (Atom a) = text $ show a
     ppExpr (Bool b) = text $ show b
-    ppExpr (If e1 e2 e3) = text "If" <+> parens (ppExpr (unsafeCoerce e1)) <+> text "then" <+> parens (ppExpr e2) <+> text "else" <+> parens (ppExpr e3)
-    ppExpr (Pair e1 e2) = text "Pair" <+> parens (ppExpr (unsafeCoerce e1) Text.PrettyPrint.<> text "," <+> ppExpr (unsafeCoerce e2))
-    ppExpr (Match e (Id (x, _), Id (y, _)) e') = text "Match" <+> ppExpr (unsafeCoerce e) 
-        <+> text "with" 
+    ppExpr (If e1 e2 e3) = text "If" <+> parens (ppExpr e1) <+> text "then" <+> parens (ppExpr e2) <+> text "else" <+> parens (ppExpr e3)
+    ppExpr (Pair e1 e2) = text "Pair" <+> parens (ppExpr e1 Text.PrettyPrint.<> text "," <+> ppExpr e2)
+    ppExpr (Match e (Id (x, _), Id (y, _)) e') = text "Match" <+> ppExpr e
+        <+> text "with"
         <+> parens (text x Text.PrettyPrint.<> text "," <+> text y) 
         <+> text "->" 
         <+> parens (ppExpr e')
@@ -116,10 +116,10 @@ instance Show (Expr a) where
     ppExpr (Lambda (Id (x, _)) e) = parens (text "λ" Text.PrettyPrint.<> text x Text.PrettyPrint.<> text "." <+> ppExpr e)
     ppExpr (Apply e1 e2) = ppExpr e1 <+> text "`Apply`" <+> parens (ppExpr e2)
     ppExpr (MemoBernoulli p) = text "MemoBernoulli" <+> text (show p)
-    ppExpr (MemoApply e1 e2) = ppExpr (unsafeCoerce e1) <+> text "`MemoApply`" <+> parens (ppExpr (unsafeCoerce e2))
-    ppExpr (Eq e1 e2) = parens (ppExpr (unsafeCoerce e1)) <+> text "==" <+> parens (ppExpr (unsafeCoerce e2))
-    ppExpr (Let d e) = text "Let" <+> parens (ppDefn (unsafeCoerce d)) <+> text "in" <+> ppExpr e
-    ppExpr (Sequence e1 e2) = ppExpr (unsafeCoerce e1) Text.PrettyPrint.<> semi <+> ppExpr e2
+    ppExpr (MemoApply e1 e2) = ppExpr e1 <+> text "`MemoApply`" <+> parens (ppExpr e2)
+    ppExpr (Eq e1 e2) = parens (ppExpr e1) <+> text "==" <+> parens (ppExpr e2)
+    ppExpr (Let d e) = text "Let" <+> parens (ppDefn d) <+> text "in" <+> ppExpr e
+    ppExpr (Sequence e1 e2) = ppExpr e1 Text.PrettyPrint.<> semi <+> ppExpr e2
     ppExpr Fresh = text "Fresh"
     ppExpr Flip = text "Flip"
 
@@ -303,11 +303,11 @@ instance Arbitrary (Exists Expr) where
             This this1 <- arbExpr ls (Just t1) (n `div` 2)
             This this2 <- arbExpr ls' t (n `div` 2)
             return $ This $ Let (Val (Id (s1, unsafeCoerce t1)) (unsafeCoerce this1)) (unsafeCoerce this2)
-        -- , do -- Sequence construct
-        --     This t1 <- elements baseTypes
-        --     This this1 <- arbExpr ls (Just t1) (n `div` 2)
-        --     This this2 <- arbExpr ls t (n `div` 2)
-        --     return $ This $ Sequence (unsafeCoerce this1) (unsafeCoerce this2)
+        , do -- Sequence construct
+            This t1 <- elements baseTypes
+            This this1 <- arbExpr ls (Just t1) (n `div` 2)
+            This this2 <- arbExpr ls t (n `div` 2)
+            return $ This $ Sequence (unsafeCoerce this1) (unsafeCoerce this2)
         ]
     round' :: Int -> Double -> Double
     round' prec num = ((fromIntegral :: Integer -> Double). round 

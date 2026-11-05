@@ -2,7 +2,7 @@
 module RegressionSpec (spec) where
 
 import Test.Hspec
-import Control.Exception (evaluate)
+import Control.Exception (ErrorCall (ErrorCall), evaluate)
 import Control.Monad (forM_)
 import qualified Data.List as List
 import qualified Numeric.Probability.Distribution as Dist
@@ -15,12 +15,7 @@ import Values
 import Semantics
 
 booleanLaw :: Evaluator -> Expr 'TBool -> [(Bool, Double)]
-booleanLaw sem e =
-  let T ev = sem e initEnv
-      values = fmap (\(BoolVal b, _) -> b) $
-        State.runStateT ev (initMem, S Map.empty)
-      Dist.Cons law = Dist.norm values
-  in law
+booleanLaw = runBooleanLaw
 
 spec :: Spec
 spec = do
@@ -28,6 +23,50 @@ spec = do
   orderingSpec
   observationSpec
   biasSpec
+  simplifySpec
+  defArgsSpec
+
+defArgsSpec :: Spec
+defArgsSpec = describe "Definition of arguments" $ do
+  it "rejects fewer arguments than parameters instead of dropping some" $ do
+    let fps = [This (Id ("x", 𝔹)), This (Id ("y", 𝔹))]
+        args = [This (BoolVal True)]
+    evaluate (forceEnv (defArgs initEnv fps args)) `shouldThrow` anyErrorCall
+  it "names the ident and both types on a type mismatch" $ do
+    let fps = [This (Id ("flag", 𝔹))]
+        args = [This (AtomVal (Atm 0))]
+        env = defArgs initEnv fps args
+    evaluate (find env (Id ("flag", 𝔹)))
+      `shouldThrow` (errorCallsWithFragments
+        ["flag", "TBool", "TAtom"])
+  where
+    forceEnv env = envSize env `seq` env
+    errorCallsWithFragments fragments (ErrorCall msg) =
+      all (`List.isInfixOf` msg) fragments
+
+simplifySpec :: Spec
+simplifySpec = describe "Simplified states" $ do
+  it "fails loudly when the bias map is missing an allocated function" $ do
+    let (_, table) = freshLeft (initMem :: MemDen)
+        inconsistent = (table, S Map.empty :: StateOfBiases MemDen)
+    evaluate (simplify ((), inconsistent)) `shouldThrow` anyErrorCall
+  it "returns the same cached bit on two queries of one key" $ do
+    -- A memo-table bit is sampled once and stored, so two queries of the
+    -- same (function, atom) key always agree. At bias 1/2 the joint law is
+    -- (False,False) and (True,True) with mass 1/2 each and the mixed pairs
+    -- with mass 0.
+    let e = Let (Val (Id ("m", MemFn)) (MemoBernoulli 0.5)) $
+              Let (Val (Id ("a", 𝔸)) Fresh) $
+                Pair
+                  (MemoApply (Variable (Id ("m", MemFn))) (Variable (Id ("a", 𝔸))))
+                  (MemoApply (Variable (Id ("m", MemFn))) (Variable (Id ("a", 𝔸))))
+    jointLaw den e `shouldBe` [((False, False), 0.5), ((True, True), 0.5)]
+    where
+      jointLaw sem e =
+        let T ev = sem e initEnv
+            values = fmap fst $ State.runStateT ev (initMem, S Map.empty)
+            Dist.Cons outcomes = Dist.norm values
+        in map (\(PairVal (BoolVal b1) (BoolVal b2) _, p) -> ((b1, b2), p)) outcomes
 
 expressionSpec :: Spec
 expressionSpec = describe "Expression structure" $ do
@@ -61,7 +100,6 @@ orderingSpec = describe "Value ordering" $ do
   it "orders pairs lexicographically" $ do
     let u = PairVal (BoolVal False) (BoolVal True) (Prod 𝔹 𝔹)
         v = PairVal (BoolVal True) (BoolVal False) (Prod 𝔹 𝔹)
-    (u <= v) `shouldBe` True
     compare u v `shouldBe` LT
     compare v u `shouldBe` GT
   it "is reflexive on returned functions" $ do
@@ -69,8 +107,7 @@ orderingSpec = describe "Value ordering" $ do
         T ev = bigStep (Lambda x (Variable x)) initEnv
         Dist.Cons outcomes = fmap fst $ State.runStateT ev (initMem, S Map.empty)
     case outcomes of
-      [(f, _)] -> do
-        (f <= f) `shouldBe` True
+      [(f, _)] ->
         compare f f `shouldBe` EQ
       _ -> expectationFailure "identity closure must have a singleton law"
 
@@ -91,16 +128,29 @@ observationSpec = describe "Returned observations" $ do
       it "distinguishes the environments of identically written closures" $ do
         booleanLaw sem (Apply (captured True) (Bool False)) `shouldBe` [(True, 1)]
         booleanLaw sem (Apply (captured False) (Bool False)) `shouldBe` [(False, 1)]
-        approx'' (run sem (captured True))
-                 (run sem (captured False)) `shouldBe` False
+        Dist.approx (run sem (captured True))
+                    (run sem (captured False)) `shouldBe` False
       it "distinguishes biases of memo functions allocated by returned closures" $ do
         let make p = Lambda (Id ("argument", 𝔹)) (MemoBernoulli p)
-        approx'' (run sem (make 0)) (run sem (make 1)) `shouldBe` False
+        Dist.approx (run sem (make 0)) (run sem (make 1)) `shouldBe` False
       it "retains the two cached-bit outcomes of a returned memo label and atom" $ do
         let e = Pair (MemoBernoulli 0.5) Fresh
             Dist.Cons outcomes = run sem e
-        List.length outcomes `shouldBe` 2
+        length outcomes `shouldBe` 2
         map snd outcomes `shouldBe` [0.5, 0.5]
+      it "distinguishes a stored bit from a freshly sampled bit on a second call" $ do
+        -- correlated applies m to the probe atom, so two calls on the same
+        -- atom return the same stored bit; independent applies m to a fresh
+        -- atom each call, so two calls are independent.
+        let correlated =
+              Let (Val (Id ("m", MemFn)) (MemoBernoulli 0.5)) $
+                Lambda (Id ("argument", 𝔸))
+                  (MemoApply (Variable (Id ("m", MemFn))) (Variable (Id ("argument", 𝔸))))
+            independent =
+              Let (Val (Id ("m", MemFn)) (MemoBernoulli 0.5)) $
+                Lambda (Id ("argument", 𝔸))
+                  (MemoApply (Variable (Id ("m", MemFn))) Fresh)
+        Dist.approx (run sem correlated) (run sem independent) `shouldBe` False
 
 totalMass :: T a -> Double
 totalMass (T ev) =

@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, ExtendedDefaultRules, TypeFamilies, ConstraintKinds, FlexibleContexts, AllowAmbiguousTypes, GADTs, DataKinds, PolyKinds, RankNTypes, PartialTypeSignatures, UndecidableInstances, StandaloneDeriving, DerivingVia, FlexibleInstances #-}
+{-# LANGUAGE GADTs, DataKinds, TypeFamilies, StandaloneDeriving, PolyKinds #-}
 
 module Environment where
 
@@ -15,6 +15,13 @@ import Syntax
 ------------------------
 
 
+-- An environment maps an identifier key (its name and its type) to an
+-- existentially typed value, using Data.Map. Looking up an identifier requires
+-- both its name and its type to match. define inserts, so a shadowing binding
+-- overwrites the same key; union is left-biased, so the left environment
+-- shadows the right.
+newtype Env v = Env (Map.Map (String, TType) (Exists v))
+
 class Environment env where
   type Val env :: TType -> Type
   emptyEnv :: env
@@ -23,17 +30,8 @@ class Environment env where
   define :: env -> Ident a -> (Val env) a -> env
   defArgs :: env -> [Exists Ident] -> [Exists (Val env)] -> env
   makeEnv :: [(Ident a, (Val env) a)] -> env
-  -- names :: env v -> [Exists Ident]
   union :: env -> env -> env
-  length :: env -> Int
-
--- list of pairs of identifiers and values
-newtype IdentVal v a = IdentVal (Ident a, v a)
-deriving instance Show (v a) => Show (IdentVal v a)
-
-newtype Env v = Env [Exists (IdentVal v)]
-
--- newtype Env v = Env (Map.Map (Exists Ident) (Exists v)) 
+  envSize :: env -> Int
 
 ------------------------
 -- | BIGRAPH MEMORY

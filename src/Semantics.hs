@@ -1,18 +1,16 @@
-{-# LANGUAGE ScopedTypeVariables, ExtendedDefaultRules, TypeFamilies, ConstraintKinds, FlexibleContexts, AllowAmbiguousTypes, GADTs, DataKinds, PolyKinds, RankNTypes, PartialTypeSignatures, UndecidableInstances, DerivingVia, FlexibleInstances #-}
+{-# LANGUAGE GADTs, DataKinds, FlexibleContexts, RankNTypes #-}
 
 module Semantics where
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 
-import Data.Maybe (fromJust, isJust)
+import Data.Maybe (isJust, maybeToList)
 import Data.Type.Equality ((:~:)(Refl), testEquality)
-import Control.Monad (forM_, forM, unless, foldM)
+import Control.Monad (forM_, forM, unless)
 
 import qualified Numeric.Probability.Distribution as Dist
 import qualified Control.Monad.State as State
--- import qualified Control.Monad.Trans.State.Strict as State
-import Debug.Trace (traceM)
 
 import Syntax
 import Environment
@@ -34,18 +32,6 @@ bernoulli θ = validateBias θ `seq`
   if θ == 0 then return False
   else if θ == 1 then return True
   else Dist.choose θ True False
-
--- Compare normalized outcomes with the original strict per-entry tolerance.
--- Observation and state keys have lawful total orders, so the distribution
--- library performs all grouping and sorting.
-approx'' :: (RealFloat prob, Ord a) =>
-  Dist.T prob a -> Dist.T prob a -> Bool
-approx'' (Dist.Cons xs) (Dist.Cons ys) =
-  let (xse, xsp) = unzip (Dist.norm' xs)
-      (yse, ysp) = unzip (Dist.norm' ys)
-  in xse == yse &&
-      all (\p -> abs p < 1e-2) (zipWith (-) xsp ysp)
-
 
 ------------------------
 -- | SEMANTICS
@@ -81,56 +67,58 @@ freshFnOpSem θ = validateBias θ `seq` T (do
 
 
 bigStep :: Expr a -> EnvVal -> T (Value a)
-bigStep (Atom a) _ = return $ AtomVal a
-bigStep (Bool b) _ = return $ BoolVal b
-bigStep (If e1 e2 e3) env = do
-  b <- bigStep e1 env
+bigStep e env = checkSourceIdents e `seq` bigStepRec e env
+
+bigStepRec :: Expr a -> EnvVal -> T (Value a)
+bigStepRec (Atom a) _ = return $ AtomVal a
+bigStepRec (Bool b) _ = return $ BoolVal b
+bigStepRec (If e1 e2 e3) env = do
+  b <- bigStepRec e1 env
   case b of
-    BoolVal True -> bigStep e2 env
-    BoolVal False -> bigStep e3 env
-bigStep (Pair e1 e2) env = do
-  v1 <- bigStep e1 env
-  v2 <- bigStep e2 env
+    BoolVal True -> bigStepRec e2 env
+    BoolVal False -> bigStepRec e3 env
+bigStepRec (Pair e1 e2) env = do
+  v1 <- bigStepRec e1 env
+  v2 <- bigStepRec e2 env
   return $ PairVal v1 v2 $ Prod (typeFromVal v1) (typeFromVal v2)
-bigStep (Match e1 (x1, x2) e2) env = do
-  v <- bigStep e1 env
+bigStepRec (Match e1 (x1, x2) e2) env = do
+  v <- bigStepRec e1 env
   case v of
-    PairVal v1 v2 _ -> bigStep e2 $ defArgs env fps args
+    PairVal v1 v2 _ -> bigStepRec e2 $ defArgs env fps args
       where
         fps = [This x1, This x2]
         args = [This v1, This v2]
-bigStep (Variable x) env = return $ find env x
-bigStep (Lambda xs e1) env = do
+bigStepRec (Variable x) env = return $ find env x
+bigStepRec (Lambda xs e1) env = do
   return $ Function
-      -- (bigStep e1 . defArgs env (map This xs) . map This)
-      (\arg -> bigStep e1 $ define env xs arg)
+      (\arg -> bigStepRec e1 $ define env xs arg)
       (Lambda xs e1)
-      (makeEnv [], env)
+      (emptyEnv, env)
       $ typeFromExpr (Lambda xs e1)
-bigStep (Apply f es) env = do
-  fv <- bigStep f env
-  v <- bigStep es env
+bigStepRec (Apply f es) env = do
+  fv <- bigStepRec f env
+  v <- bigStepRec es env
   case fv of
     Function f' _ _ _ -> f' v
-bigStep (MemoBernoulli θ) _ = do
+bigStepRec (MemoBernoulli θ) _ = do
   f <- freshFnOpSem θ
   return $ MemoFunction f
-bigStep (MemoApply f e) env = do
-  fv <- bigStep f env
-  v <- bigStep e env
+bigStepRec (MemoApply f e) env = do
+  fv <- bigStepRec f env
+  v <- bigStepRec e env
   case (fv, v) of
     (MemoFunction f', AtomVal a) -> BoolVal <$> getOpSem (f', a)
-bigStep (Eq e1 e2) env = do
-  v1 <- bigStep e1 env
-  v2 <- bigStep e2 env
+bigStepRec (Eq e1 e2) env = do
+  v1 <- bigStepRec e1 env
+  v2 <- bigStepRec e2 env
   return $ BoolVal (v1 == v2)
-bigStep Fresh _ = AtomVal <$> freshAtmOpSem
-bigStep Flip _ = T $ State.lift $ BoolVal <$> bernoulli 0.5
-bigStep (Let (Val x e) e1) env = do
-  env' <- define env x <$> bigStep e env
-  bigStep e1 env'
-bigStep (Sequence e1 e2) env =
-  bigStep e1 env >> bigStep e2 env
+bigStepRec Fresh _ = AtomVal <$> freshAtmOpSem
+bigStepRec Flip _ = T $ State.lift $ BoolVal <$> bernoulli 0.5
+bigStepRec (Let (Val x e) e1) env = do
+  env' <- define env x <$> bigStepRec e env
+  bigStepRec e1 env'
+bigStepRec (Sequence e1 e2) env =
+  bigStepRec e1 env >> bigStepRec e2 env
 
 completeBigraph :: T ()
 completeBigraph = do
@@ -163,11 +151,6 @@ type 𝒯 x = State.StateT (Flag, Maybe [(EnvVal, EnvVal)], EnvVal, EnvVal) T x
 -- Maybe [(EnvVal, EnvVal)] is the restoration stack of (envTemp, env) environments to restore once we hit a value 
 -- EnvVal, EnvVal: envTemp, env: an extra environment envTemp for temporary variables (to store values that need to be remembered while evaluating the expression), and the current environment env
 
-getFlag :: 𝒯 Flag
-getFlag = do
-  (flag, _, _, _) <- State.get
-  return flag
-
 setFlag :: Bool -> 𝒯 ()
 setFlag b = do
   (_, envs, envTemp, env) <- State.get
@@ -193,6 +176,76 @@ restoreEnv = do
       State.put (False, Just envs, envTemp', env')
     _ -> do 
       State.put (False, Nothing, envTemp, env)
+
+-- | The reserved prefix for machine-generated temporaries. Every temporary
+-- the evaluators introduce begins with this character. bigStep, den,
+-- smallStepIterate, smallStepIterated, smallStepIteratedTraced and
+-- iterateSmallStep reject a source program that uses it (see
+-- checkSourceIdents); the recursive workers and smallStep assume a program
+-- that has passed that check.
+tempPrefix :: String
+tempPrefix = "#"
+
+-- | Reject, with a named error, a source program that uses the reserved
+-- temporary prefix in any identifier it writes.
+checkSourceIdents :: Expr a -> ()
+checkSourceIdents e
+  | null offenders = ()
+  | otherwise = error $
+      "source program uses reserved prefix '" ++ tempPrefix
+      ++ "' in identifier " ++ show (head offenders)
+  where
+    offenders = [ name | name <- identNames e, tempPrefix `isPrefixOf` name ]
+    isPrefixOf p s = take (length p) s == p
+    identNames :: Expr b -> [String]
+    identNames (Atom _) = []
+    identNames (Bool _) = []
+    identNames (If a b c) = identNames a ++ identNames b ++ identNames c
+    identNames (Pair a b) = identNames a ++ identNames b
+    identNames (Match a (Id (x, _), Id (y, _)) b) =
+      identNames a ++ [x, y] ++ identNames b
+    identNames (Variable (Id (x, _))) = [x]
+    identNames (Lambda (Id (x, _)) b) = x : identNames b
+    identNames (Apply f a) = identNames f ++ identNames a
+    identNames (MemoBernoulli _) = []
+    identNames (MemoApply f a) = identNames f ++ identNames a
+    identNames (Eq a b) = identNames a ++ identNames b
+    identNames (Let (Val (Id (x, _)) v) b) = x : identNames v ++ identNames b
+    identNames (Sequence a b) = identNames a ++ identNames b
+    identNames Fresh = []
+    identNames Flip = []
+
+-- | Bind a temporary for a value about to be stepped into.
+storeTemp :: String -> Value a -> 𝒯 (Ident a)
+storeTemp prefix v = do
+  (_, envs', envTemp', env') <- State.get
+  let varName = tempPrefix ++ prefix ++ show (envSize envTemp'
+              + envSize env' + 1)
+      ident = Id (varName, typeFromVal v)
+      envTemp'' = define envTemp' ident v
+  State.put (False, envs', envTemp'', env')
+  return ident
+
+-- | Step a subterm; while it is still reducing, rebuild the parent around
+-- the reduced subterm (guarded), and once it is a value, bind a fresh
+-- temporary for the value and rebuild the parent around its variable.
+withTemp :: String -> Expr a
+  -> (Expr a -> Expr b)   -- ^ rebuild around a still-reducing subterm
+  -> (Ident a -> Expr b)  -- ^ rebuild around the fresh temporary variable
+  -> 𝒯 (ExprOrValue b)
+withTemp prefix sub onStep onValue = do
+  (flag, _, envTemp, env) <- State.get
+  unless flag $ addRestore (envTemp, env)
+  setFlag False
+  sub' <- smallStep sub
+  case sub' of
+    Left sub'' -> do
+      setFlag True
+      return $ Left $ onStep sub''
+    Right v -> do
+      restoreEnv
+      ident <- storeTemp prefix v
+      return $ Left $ onValue ident
 
 -- smallStep: 
 smallStep :: Expr a -> 𝒯 (ExprOrValue a)
@@ -230,24 +283,10 @@ smallStep (Pair e1 e2) = do
           let v1 = find (envTemp `union` env) x
           return $ Right $ PairVal v1 v2 
             $ Prod (typeFromVal v1) (typeFromVal v2)
-    _ -> do
-      (flag, _, envTemp, env) <- State.get
-      unless flag $ addRestore (envTemp, env)
-      setFlag False
-      e1' <- smallStep e1
-      case e1' of
-        Left e1'' -> do
-          setFlag True
-          return (Left $ Pair e1'' e2)
-        Right v1 -> do
-          restoreEnv
-          (_, envs', envTemp', env') <- State.get
-          let varName = "xTemp_" ++ show (Environment.length envTemp' 
-                      + Environment.length env' + 1)
-              ident = Id (varName, typeFromVal v1)
-              envTemp'' = define envTemp' ident v1
-          State.put (False, envs', envTemp'', env')
-          return $ Left $ Pair (Variable ident) e2
+    _ ->
+      withTemp "xTemp_" e1
+        (\e1'' -> Pair e1'' e2)
+        (\ident -> Pair (Variable ident) e2)
 smallStep (Match e1 (x1, x2) e2) = do
   e1' <- smallStep e1
   case e1' of
@@ -289,33 +328,20 @@ smallStep (Apply f es) = do
             Lambda xs e1 -> do
               (_, _, envTemp', env') <- State.get
               addRestore (envTemp', env')
-              let varName = "xLambdaTemp_" ++ show (Environment.length envF + 1)
+              let mergedTemp = envTempF `union` envTemp'
+                  varName = tempPrefix ++ "xLambdaTemp_" ++ show (envSize mergedTemp
+                            + envSize (envF `union` env') + 1)
                   ident = Id (varName, typeFromVal v')
-                  envTemp'' = define (envTempF `union` envTemp') ident v'
-                  -- envTemp'' = makeEnv [(ident, v')]
+                  envTemp'' = define mergedTemp ident v'
                   env'' = define (envF `union` env') xs v'
               setFlag False
               setEnv (envTemp'', env'')
               return $ Left $ Let (Val xs (Variable ident)) e1
             _ -> error "smallStep: Apply: impossible case"
-    _ -> do
-      (flag, _, envTemp, env) <- State.get
-      unless flag $ addRestore (envTemp, env)
-      setFlag False
-      f' <- smallStep f
-      case f' of
-        Left f'' -> do
-          setFlag True
-          return $ Left $ Apply f'' es
-        Right fv -> do
-          restoreEnv
-          (_, envs', envTemp', env') <- State.get
-          let varName = "fTemp_" ++ show (Environment.length envTemp' 
-                      + Environment.length env' + 1)
-              ident = Id (varName, typeFromVal fv)
-              envTemp'' = define envTemp' ident fv
-          State.put (False, envs', envTemp'', env')
-          return $ Left $ Apply (Variable ident) es
+    _ ->
+      withTemp "fTemp_" f
+        (\f'' -> Apply f'' es)
+        (\ident -> Apply (Variable ident) es)
 smallStep (MemoBernoulli θ) = do
   f <- State.lift $ freshFnOpSem θ
   return $ Right $ MemoFunction f
@@ -336,24 +362,10 @@ smallStep (MemoApply f e) = do
           let MemoFunction f' = find (envTemp `union` env) x
           b <- State.lift $ getOpSem (f', a)
           return $ Right $ BoolVal b
-    _ -> do
-      (flag, _, envTemp, env) <- State.get
-      unless flag $ addRestore (envTemp, env)
-      setFlag False
-      f' <- smallStep f
-      case f' of
-        Left f'' -> do
-          setFlag True
-          return $ Left $ MemoApply f'' e
-        Right fv -> do
-          restoreEnv
-          (_, envs', envTemp', env') <- State.get
-          let varName = "fMemoTemp_" ++ show (Environment.length envTemp' 
-                      + Environment.length env' + 1)
-              ident = Id (varName, typeFromVal fv)
-              envTemp'' = define envTemp' ident fv
-          State.put (False, envs', envTemp'', env')
-          return $ Left $ MemoApply (Variable ident) e
+    _ ->
+      withTemp "fMemoTemp_" f
+        (\f'' -> MemoApply f'' e)
+        (\ident -> MemoApply (Variable ident) e)
 smallStep (Let (Val x e1) e2) = do
   (_, _, envT, _) <- State.get
   case e1 of
@@ -366,21 +378,31 @@ smallStep (Let (Val x e1) e2) = do
           restoreEnv
           return $ Right v
     _ -> do
+      (flag, _, envTemp, env) <- State.get
+      unless flag $ addRestore (envTemp, env)
+      setFlag False
       e1' <- smallStep e1
       case e1' of
         Left e1'' -> do
+          setFlag True
           return $ Left $ Let (Val x e1'') e2
         Right v -> do
-          (_, envs, envTemp, env) <- State.get
-          let env' = define env x v
-          State.put (False, envs, envTemp, env')
+          restoreEnv
+          (_, envs, envTemp', env') <- State.get
+          let env'' = define env' x v
+          State.put (False, envs, envTemp', env'')
           return $ Left e2
 smallStep (Sequence e1 e2) = do
+  (flag, _, envTemp, env) <- State.get
+  unless flag $ addRestore (envTemp, env)
+  setFlag False
   e1' <- smallStep e1
   case e1' of
     Left e1'' -> do
+      setFlag True
       return $ Left $ Sequence e1'' e2
     Right _ -> do
+      restoreEnv
       return $ Left e2
 smallStep Fresh = do
   a <- State.lift freshAtmOpSem
@@ -404,24 +426,10 @@ smallStep (Eq e1 e2) = do
           restoreEnv
           let v1 = find (envTemp `union` env) x
           return $ Right $ BoolVal $ v1 == v2
-    _ -> do
-      (flag, _, envTemp, env) <- State.get
-      unless flag $ addRestore (envTemp, env)
-      setFlag False
-      e1' <- smallStep e1
-      case e1' of
-        Left e1'' -> do
-          setFlag True
-          return $ Left $ Eq e1'' e2
-        Right v1 -> do
-          restoreEnv
-          (_, envs', envTemp', env') <- State.get
-          let varName = "eTemp_" ++ show (Environment.length envTemp' 
-                      + Environment.length env' + 1)
-              ident = Id (varName, typeFromVal v1)
-              envTemp'' = define envTemp' ident v1
-          State.put (False, envs', envTemp'', env')
-          return $ Left $ Eq (Variable ident) e2
+    _ ->
+      withTemp "eTemp_" e1
+        (\e1'' -> Eq e1'' e2)
+        (\ident -> Eq (Variable ident) e2)
 
 subst :: Expr a -> EnvVal -> T (Expr a)
 subst (Atom a) _ = return $ Atom a
@@ -455,10 +463,10 @@ valueToExpr (PairVal a b _) = (Pair <$> valueToExpr a) <*> valueToExpr b
 
 -- | Transitive closure of small step semantics
 
-smallStepIterate :: Int -> Expr a -> EnvVal 
+smallStepIterate :: Int -> Expr a -> EnvVal
   -> T (ExprOrValue a, (Flag, Maybe [(EnvVal, EnvVal)], EnvVal, EnvVal))
-smallStepIterate n expr env = do
-  let s0 = (False, Nothing, makeEnv [], env)
+smallStepIterate n expr env = checkSourceIdents expr `seq` do
+  let s0 = (False, Nothing, emptyEnv, env)
   smallStepIterate' n expr s0
   where 
     smallStepIterate' 0 e s@(_, _, envTemp, _) = do 
@@ -472,29 +480,40 @@ smallStepIterate n expr env = do
 
 
 -- using smallStep:
-smallStepIterated :: Expr a -> EnvVal -> T (Value a)
-smallStepIterated expr env = do 
-  let s0 = (False, Nothing, makeEnv [], env)
-  smallStepIt expr s0
-  where 
-    smallStepIt e s = do
+-- One iteration loop. The optional observer is called with the step index
+-- and the new expression-or-value and state after each step; it returns a
+-- log line that the loop accumulates and returns alongside the value, so
+-- the trace is part of the result.
+iterateSmallStep ::
+  (Int -> ExprOrValue a -> (Flag, Maybe [(EnvVal, EnvVal)], EnvVal, EnvVal) -> Maybe String)
+  -> Expr a -> EnvVal -> T (Value a, [String])
+iterateSmallStep observe expr env = checkSourceIdents expr `seq` do
+  let s0 = (False, Nothing, emptyEnv, env)
+      header = observe 0 (Left expr) s0
+  smallStepIt 1 expr s0 (maybeToList header)
+  where
+    smallStepIt i e s acc = do
       (e', s') <- State.runStateT (smallStep e) s
+      let acc' = maybe acc (: acc) (observe i e' s')
       case e' of
-        Left e'' -> smallStepIt e'' s'
-        Right v -> return v
+        Left e'' -> smallStepIt (i + 1) e'' s' acc'
+        Right v -> return (v, reverse acc')
 
-smallStepIteratedDebug :: Expr a -> EnvVal -> T (Value a)
-smallStepIteratedDebug expr env = do 
-  let s0 = (False, Nothing, makeEnv [], env)
-  traceM $ "Step 0: \n" ++ show expr ++ "\n " ++ show s0 ++ "\n\n"
-  smallStepIt 1 expr s0
-  where 
-    smallStepIt (i :: Int) e s = do
-      (e', s') <- State.runStateT (smallStep e) s
-      traceM $ "Step " ++ show i ++ ": \n" ++ show e' ++ "\n " ++ show s' ++ "\n\n"
-      case e' of
-        Left e'' -> smallStepIt (i+1) e'' s'
-        Right v -> return v
+-- | The plain small-step iteration, with no per-step observer.
+smallStepIterated :: Expr a -> EnvVal -> T (Value a)
+smallStepIterated expr env = checkSourceIdents expr `seq`
+  fst <$> iterateSmallStep (\_ _ _ -> Nothing) expr env
+
+-- | The traced small-step iteration: the value plus the per-step log, so a
+-- caller can render the trace however it chooses, for example in a
+-- counterexample string.
+smallStepIteratedTraced :: Expr a -> EnvVal -> T (Value a, String)
+smallStepIteratedTraced expr env = checkSourceIdents expr `seq` do
+  (v, lines') <- iterateSmallStep observe expr env
+  return (v, unlines lines')
+  where
+    observe i e s = Just $
+      "Step " ++ show i ++ ": \n" ++ show e ++ "\n " ++ show s ++ "\n"
 
 smallStepIteratedComplete :: Expr a -> EnvVal -> T (Value a)
 smallStepIteratedComplete e env = do
@@ -503,83 +522,87 @@ smallStepIteratedComplete e env = do
   return v
 
 -- | Denotational Semantics
+--
+-- getDen samples a memo-table edge the first time it is used and stores the
+-- result, as the big-step semantics does, so repeated queries of the same
+-- edge return the same bit.
 getDen :: (FnLabels, AtmLabels) -> T Bool
 getDen (l, r) = T $ do
-  (g, _) <- State.get
-  State.lift $ return $
-    fromJust $ contents g (l, r)
+  (g, S λ) <- State.get
+  case contents g (l, r) of
+    Just b -> State.lift $ return b
+    Nothing -> do
+      let θ = λ Map.! l
+      b <- State.lift $ bernoulli θ
+      State.put (update g (l, r) b, S λ)
+      State.lift $ return b
 
 freshAtmDen :: T AtmLabels
 freshAtmDen = T $ do
-  (g, S λ) <- State.get
-  let (r, g'@(Mem ((ls, _), _))) = freshRight g
-  gNew <- State.lift $
-    foldM (\g'' l -> update g'' (l, r)
-      <$> bernoulli (λ Map.! l))
-    g' ls
-  State.put (gNew, S λ)
+  (g, sλ) <- State.get
+  let (r, g') = freshRight g
+  State.put (g', sλ)
   return r
 
 freshFnDen :: Double -> T FnLabels
 freshFnDen θ = validateBias θ `seq` T (do
   (g, S λ) <- State.get
-  let (l, g'@(Mem ((_, rs), _))) = freshLeft g
-  gNew <- State.lift $
-    foldM (\g'' r -> update g'' (l, r)
-      <$> bernoulli θ)
-    g' rs
+  let (l, g') = freshLeft g
   let λ' = Map.insert l θ λ
-  State.put (gNew, S λ')
+  State.put (g', S λ')
   return l)
 
 den :: Expr a -> EnvVal -> T (Value a)
-den (Atom a) _ = return $ AtomVal a
-den (Bool b) _ = return $ BoolVal b
-den (If e1 e2 e3) env = do
-  b <- den e1 env
+den e env = checkSourceIdents e `seq` denRec e env
+
+denRec :: Expr a -> EnvVal -> T (Value a)
+denRec (Atom a) _ = return $ AtomVal a
+denRec (Bool b) _ = return $ BoolVal b
+denRec (If e1 e2 e3) env = do
+  b <- denRec e1 env
   case b of
-    BoolVal True -> den e2 env
-    BoolVal False -> den e3 env
-den (Pair e1 e2) env = do
-  v1 <- den e1 env
-  v2 <- den e2 env
+    BoolVal True -> denRec e2 env
+    BoolVal False -> denRec e3 env
+denRec (Pair e1 e2) env = do
+  v1 <- denRec e1 env
+  v2 <- denRec e2 env
   return $ PairVal v1 v2 $ Prod (typeFromVal v1) (typeFromVal v2)
-den (Match e1 (x1, x2) e2) env = do
-  v <- den e1 env
+denRec (Match e1 (x1, x2) e2) env = do
+  v <- denRec e1 env
   case v of
-    PairVal v1 v2 _ -> den e2 $ defArgs env
+    PairVal v1 v2 _ -> denRec e2 $ defArgs env
       [This x1, This x2] [This v1, This v2]
-den (Variable x) env = return $ find env x
-den (Apply f es) env = do
-  fv <- den f env
-  v <- den es env
+denRec (Variable x) env = return $ find env x
+denRec (Apply f es) env = do
+  fv <- denRec f env
+  v <- denRec es env
   case fv of
     Function f' _ _ _ -> f' v
-den (Lambda xs e1) env = do
+denRec (Lambda xs e1) env = do
   return $ Function
-      (\arg -> den e1 $ define env xs arg)
+      (\arg -> denRec e1 $ define env xs arg)
       (Lambda xs e1)
-      (makeEnv [], env)
+      (emptyEnv, env)
       $ typeFromExpr (Lambda xs e1)
-den (MemoBernoulli θ) _ = do
+denRec (MemoBernoulli θ) _ = do
   f <- freshFnDen θ
   return $ MemoFunction f
-den (MemoApply f e) env = do
-  fv <- den f env
-  v <- den e env
+denRec (MemoApply f e) env = do
+  fv <- denRec f env
+  v <- denRec e env
   case (fv, v) of
     (MemoFunction f', AtomVal a) -> BoolVal <$> getDen (f', a)
-den (Eq e1 e2) env = do
-  v1 <- den e1 env
-  v2 <- den e2 env
+denRec (Eq e1 e2) env = do
+  v1 <- denRec e1 env
+  v2 <- denRec e2 env
   return $ BoolVal (v1 == v2)
-den Fresh _ = AtomVal <$> freshAtmDen
-den Flip _ = T $ State.lift $ BoolVal <$> bernoulli 0.5
-den (Let (Val x e) e1) env = do
-  env' <- define env x <$> den e env
-  den e1 env'
-den (Sequence e1 e2) env =
-  den e1 env >> den e2 env
+denRec Fresh _ = AtomVal <$> freshAtmDen
+denRec Flip _ = T $ State.lift $ BoolVal <$> bernoulli 0.5
+denRec (Let (Val x e) e1) env = do
+  env' <- define env x <$> denRec e env
+  denRec e1 env'
+denRec (Sequence e1 e2) env =
+  denRec e1 env >> denRec e2 env
 
 
 ------------------------
@@ -589,13 +612,12 @@ den (Sequence e1 e2) env =
 simplify :: (Eq (LeftNode t), Show (LeftNode t)) =>
   (a, (MemoBigraph (LeftNode t) r b, StateOfBiases t))
   -> (a, [(LeftNode t, Double)], [r], [((LeftNode t, r), b)])
-simplify (b, (Mem ((l, r), m), S λ)) =
-    (b,
-    zipWith (\f (f', θ) ->
-      if f == f' then (f, θ) else error (show f ++ " ≠ " ++ show f'))
-      (Set.toList l) (Map.toList λ),
-    Set.toList r,
-    Map.toList m)
+simplify (b, (Mem ((l, r), m), S λ))
+  | Set.toList l == Map.keys λ =
+      (b, Map.toList λ, Set.toList r, Map.toList m)
+  | otherwise = error $
+      "allocated function labels " ++ show (Set.toList l)
+      ++ " differ from bias-map keys " ++ show (Map.keys λ)
 
 -- These are finite application observations, not extensional function equality.
 -- The result contains no closure syntax or existential environment equality.
@@ -628,9 +650,13 @@ observeValue sem (PairVal a b _) =
 observeValue sem (Function f _ _ (Arr a _)) = do
   choices <- probeChoices sem a
   (index, action) <- T $ State.lift $ Dist.uniform $ zip [0..] choices
+  -- Apply twice to the same argument: the pair of results records the
+  -- correlation between calls, which separates a stored bit from a fresh
+  -- bit when their single-call distributions agree.
   argument <- action
-  result <- f argument >>= observeValue sem
-  return $ ObservedFunction index result
+  result1 <- f argument >>= observeValue sem
+  result2 <- f argument >>= observeValue sem
+  return $ ObservedFunction index (ObservedPair result1 result2)
 
 -- Enumerate an exact uniform mixture of labelled application contexts.
 -- Each branch runs one argument in its own state: unrelated probes
@@ -679,5 +705,13 @@ run sem e =
       res = State.evalStateT ev (initMem, S Map.empty)
   in Dist.norm res
 
-runSems :: [Expr a -> Dist ObservedOutcome]
-runSems = [run den, run bigStepComplete, run smallStepIteratedComplete]
+-- | Run an evaluator on a closed boolean expression against the standard
+-- initial state and return its normalized boolean law.
+runBooleanLaw :: (Expr 'TBool -> EnvVal -> T (Value 'TBool))
+  -> Expr 'TBool -> [(Bool, Double)]
+runBooleanLaw sem e =
+  let T ev = sem e initEnv
+      values = fmap (\(BoolVal b, _) -> b) $
+        State.runStateT ev (initMem, S Map.empty)
+      Dist.Cons law = Dist.norm values
+  in law

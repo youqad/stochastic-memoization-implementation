@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, ExtendedDefaultRules, TypeFamilies, ConstraintKinds, FlexibleContexts, AllowAmbiguousTypes, GADTs, DataKinds, PolyKinds, RankNTypes, PartialTypeSignatures, UndecidableInstances, DeriveFunctor, GeneralizedNewtypeDeriving, StandaloneDeriving, DerivingVia, FlexibleInstances #-}
+{-# LANGUAGE GADTs, DataKinds, PolyKinds, StandaloneDeriving, TypeFamilies, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, FlexibleContexts, UndecidableInstances, DeriveFunctor, GeneralizedNewtypeDeriving #-}
 
 module Values where
 
@@ -74,48 +74,60 @@ instance Show (Value a) where
   show (MemoFunction a) = "<memoized function ++" ++ show a ++ ">"
   show (PairVal a b _) = "(" ++ show a ++ ", " ++ show b ++ ")"
 
-deriving instance Show (Exists (IdentVal Value))
 deriving instance Show (Exists Value)
 
 type EnvVal = Env Value
 
 instance Environment EnvVal where
   type Val EnvVal = Value
-  emptyEnv = Env []
-  find (Env m) x@(Id (s, tx)) = case m of
-    (This (IdentVal (Id (s', ty), v))):ms -> case testEquality tx ty of
-      Just Refl -> if s == s' then v else find (Env ms) x
-      Nothing -> find (Env ms) x
-    [] -> error $ show x ++ " not found in environment"
-  maybeFind (Env m) x@(Id (s, tx)) = case m of
-    (This (IdentVal (Id (s', ty), v))):ms -> case testEquality tx ty of
-      Just Refl -> if s == s' then Just v else maybeFind (Env ms) x
-      Nothing -> maybeFind (Env ms) x
-    [] -> Nothing
-  define (Env m) x v = Env (This (IdentVal (x, v)):m)
-  defArgs env fps args =
-    Env (zipWith (\(This (Id (x, tx))) (This v) ->
-              case testEquality tx (typeFromVal v) of
-                Just Refl -> This (IdentVal (Id (x, tx), v))
-                Nothing -> error "wrong type")
-        fps args) `union` env
-  makeEnv defs = Env (map (This . IdentVal) defs)
-  -- names (Env m) = Map.keys m
-  union (Env m1) (Env m2) = Env (m1 ++ m2)
-  length (Env m) = List.length m
+  emptyEnv = Env Map.empty
+  find env x = case maybeFind env x of
+    Just v -> v
+    Nothing -> error $ show x ++ " not found in environment"
+  maybeFind (Env m) (Id (s, tx)) = case Map.lookup (s, typeKey tx) m of
+    Just (This v) -> case testEquality tx (typeFromVal v) of
+      Just Refl -> Just v
+      Nothing -> Nothing
+    Nothing -> Nothing
+  define (Env m) x v = Env (Map.insert (identKey x) (This v) m)
+  defArgs env fps args
+    | List.length fps /= List.length args = error $
+        "defArgs: arity mismatch: " ++ show (List.length fps)
+        ++ " parameters but " ++ show (List.length args) ++ " arguments"
+    | otherwise = Env (foldr insertArg Map.empty (zip fps args)) `union` env
+    where
+      insertArg :: (Exists Ident, Exists Value)
+        -> Map.Map (String, TType) (Exists Value)
+        -> Map.Map (String, TType) (Exists Value)
+      insertArg (This ident, This v) m =
+        case testEquality (typeFromIdent ident) (typeFromVal v) of
+          Just Refl -> Map.insert (identKey ident) (This v) m
+          Nothing -> error $
+            "defArgs: type mismatch for " ++ show ident ++ ": expected "
+            ++ show (typeKey (typeFromIdent ident))
+            ++ " but got " ++ show (typeKey (typeFromVal v))
+  makeEnv defs = Env (Map.fromList (map (\(x, v) -> (identKey x, This v)) defs))
+  union (Env m1) (Env m2) = Env (Map.union m1 m2)
+  envSize (Env m) = Map.size m
 
 deriving instance Show EnvVal
 instance Eq EnvVal where
   (Env m1) == (Env m2) = m1 == m2
 instance Ord EnvVal where
   compare (Env m1) (Env m2) = compare m1 m2
-instance Eq (Exists (IdentVal Value)) where
-  (This (IdentVal (Id (s1, _), _))) == (This (IdentVal (Id (s2, _), _))) = s1 == s2
-instance Ord (Exists (IdentVal Value)) where
-  compare (This (IdentVal (Id (s1, _), _))) (This (IdentVal (Id (s2, _), _))) = compare s1 s2
+instance Eq (Exists Value) where
+  (This (a :: Value a)) == (This (b :: Value b)) =
+    case testEquality (typeFromVal a) (typeFromVal b) of
+      Just Refl -> a == b
+      Nothing -> False
+instance Ord (Exists Value) where
+  compare (This (a :: Value a)) (This (b :: Value b)) =
+    case testEquality (typeFromVal a) (typeFromVal b) of
+      Just Refl -> compare a b
+      Nothing -> compare (typeKey (typeFromVal a)) (typeKey (typeFromVal b))
 
 initEnv :: EnvVal
-initEnv = makeEnv []
+initEnv = emptyEnv
 
 typeFromVal :: Value a -> Typey a
 typeFromVal (AtomVal _) = 𝔸
