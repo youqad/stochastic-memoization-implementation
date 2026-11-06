@@ -15,12 +15,9 @@ import Syntax
 ------------------------
 
 
--- An environment maps an identifier key (its name and its type) to an
--- existentially typed value, using Data.Map. Looking up an identifier requires
--- both its name and its type to match. define inserts, so a shadowing binding
--- overwrites the same key; union is left-biased, so the left environment
--- shadows the right.
-newtype Env v = Env (Map.Map (String, TType) (Exists v))
+-- map of typed values (logarithmic lookup and insertion)
+-- redefining a key replaces its value; union keeps the left binding
+newtype Env v = Env (Map.Map IdentKey (Exists v))
 
 class Environment env where
   type Val env :: TType -> Type

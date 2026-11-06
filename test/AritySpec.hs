@@ -1,11 +1,6 @@
 {-# OPTIONS_GHC -fdefer-type-errors #-}
 {-# LANGUAGE GADTs, DataKinds #-}
 
--- Guards the types of Lambda and Apply: each expression below is ill-typed,
--- by its argument type or by its number of arguments, and
--- should-not-typecheck asserts the type checker rejects it, driven by
--- deferred type errors. The positive control is a well-typed
--- single-argument application evaluated in each semantics.
 module AritySpec (spec) where
 
 import Test.Hspec
@@ -16,7 +11,6 @@ import Syntax
 import Semantics (runBooleanLaw, bigStep, smallStepIterated, den)
 import Values
 
--- Hand-written rnf for the GADT; DeriveGeneric does not apply here.
 instance NFData (Expr a) where
   rnf expr = case expr of
     Atom a -> rnf a
@@ -36,42 +30,42 @@ instance NFData (Expr a) where
     Flip -> ()
 
 spec :: Spec
-spec = describe "Single-argument arity" $ do
-  it "rejects applying a non-function" $
+spec = describe "function applications: types and arity" $ do
+  it "non-function application rejected" $
     shouldNotTypecheck
       (Apply (Bool True) (Bool True) :: Expr 'TBool)
-  it "rejects applying a function to an argument of the wrong type" $
+  it "wrong argument type rejected" $
     shouldNotTypecheck
       (Apply (Lambda (Id ("x", 𝔹)) (Variable (Id ("x", 𝔹)))) Fresh :: Expr 'TBool)
-  it "rejects an atom where a memo function is expected" $
+  it "atom in place of a memo function rejected" $
     shouldNotTypecheck
       (MemoApply (Atom (Atm 0)) Fresh :: Expr 'TBool)
-  it "rejects a memo function applied to a boolean atom" $
+  it "boolean memo argument rejected" $
     shouldNotTypecheck
       (MemoApply (MemoBernoulli 0.5) (Bool True) :: Expr 'TBool)
-  it "rejects a lambda with no binders" $
+  it "lambda with no binder rejected" $
     shouldNotTypecheck
       (Lambda [] (Bool True) :: Expr ('TArrow '[ 'TBool] 'TBool))
-  it "rejects a lambda with a list of binders instead of one" $
+  it "lambda binder list rejected" $
     shouldNotTypecheck
       (Lambda [Id ("x", 𝔹)] (Bool True) :: Expr ('TArrow '[ 'TBool] 'TBool))
-  it "rejects a lambda with two binders" $
+  it "lambda with two binders rejected" $
     shouldNotTypecheck
       (Lambda [Id ("x", 𝔹), Id ("y", 𝔹)] (Bool True) :: Expr ('TArrow '[ 'TBool] 'TBool))
-  it "rejects an apply with no arguments" $
+  it "application with no argument rejected" $
     shouldNotTypecheck
       (Apply (Variable (Id ("f", Arr 𝔹 𝔹))) [] :: Expr 'TBool)
-  it "rejects an apply with a list of arguments instead of one" $
+  it "application argument list rejected" $
     shouldNotTypecheck
       (Apply (Variable (Id ("f", Arr 𝔹 𝔹))) [Bool True] :: Expr 'TBool)
-  it "rejects an apply with two arguments" $
+  it "application with two arguments rejected" $
     shouldNotTypecheck
       (Apply (Variable (Id ("f", Arr 𝔹 𝔹))) [Bool True, Bool False] :: Expr 'TBool)
-  it "evaluates a well-typed single-argument application in big-step" $
+  it "single argument under big-step" $
     runBooleanLaw bigStep valid `shouldBe` [(True, 1)]
-  it "evaluates a well-typed single-argument application in small-step" $
+  it "single argument under small-step" $
     runBooleanLaw smallStepIterated valid `shouldBe` [(True, 1)]
-  it "evaluates a well-typed single-argument application in denotational" $
+  it "single argument under denotational semantics" $
     runBooleanLaw den valid `shouldBe` [(True, 1)]
   where
     valid = Apply (Lambda (Id ("x", 𝔹)) (Variable (Id ("x", 𝔹)))) (Bool True)

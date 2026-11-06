@@ -13,13 +13,14 @@ import qualified Numeric.Probability.Distribution as Dist
 import qualified Control.Monad.State as State
 
 import Syntax
+import Ident
 import Environment
 
 ------------------------
 -- | MONADS
 ------------------------
 
-type Dist = Dist.T Double
+type Dist = Dist.T Rational
 
 data StateOfBiases t = MemoTable t => S (Map.Map (LeftNode t) Double)
 
@@ -84,8 +85,8 @@ instance Environment EnvVal where
   find env x = case maybeFind env x of
     Just v -> v
     Nothing -> error $ show x ++ " not found in environment"
-  maybeFind (Env m) (Id (s, tx)) = case Map.lookup (s, typeKey tx) m of
-    Just (This v) -> case testEquality tx (typeFromVal v) of
+  maybeFind (Env m) x = case Map.lookup (identKey x) m of
+    Just (This v) -> case testEquality (typeFromIdent x) (typeFromVal v) of
       Just Refl -> Just v
       Nothing -> Nothing
     Nothing -> Nothing
@@ -97,8 +98,8 @@ instance Environment EnvVal where
     | otherwise = Env (foldr insertArg Map.empty (zip fps args)) `union` env
     where
       insertArg :: (Exists Ident, Exists Value)
-        -> Map.Map (String, TType) (Exists Value)
-        -> Map.Map (String, TType) (Exists Value)
+        -> Map.Map IdentKey (Exists Value)
+        -> Map.Map IdentKey (Exists Value)
       insertArg (This ident, This v) m =
         case testEquality (typeFromIdent ident) (typeFromVal v) of
           Just Refl -> Map.insert (identKey ident) (This v) m
@@ -106,7 +107,8 @@ instance Environment EnvVal where
             "defArgs: type mismatch for " ++ show ident ++ ": expected "
             ++ show (typeKey (typeFromIdent ident))
             ++ " but got " ++ show (typeKey (typeFromVal v))
-  makeEnv defs = Env (Map.fromList (map (\(x, v) -> (identKey x, This v)) defs))
+  makeEnv defs = Env (Map.fromListWith (\_new old -> old)
+    (map (\(x, v) -> (identKey x, This v)) defs))
   union (Env m1) (Env m2) = Env (Map.union m1 m2)
   envSize (Env m) = Map.size m
 
@@ -138,6 +140,7 @@ typeFromVal (PairVal _ _ t) = t
 
 typeFromIdent :: Ident a -> Typey a
 typeFromIdent (Id (_, t)) = t
+typeFromIdent (Gen (_, t)) = t
 
 typeFromExpr :: Expr a -> Typey a
 typeFromExpr (Atom _) = 𝔸
@@ -145,7 +148,7 @@ typeFromExpr (Bool _) = 𝔹
 typeFromExpr (If _ e _) = typeFromExpr e
 typeFromExpr (Pair e1 e2) = Prod (typeFromExpr e1) (typeFromExpr e2)
 typeFromExpr (Match _ _ e) = typeFromExpr e
-typeFromExpr (Variable (Id (_, t))) = t
+typeFromExpr (Variable x) = typeFromIdent x
 typeFromExpr (Lambda x e) = Arr (typeFromIdent x) (typeFromExpr e)
 typeFromExpr (Apply e _) = case typeFromExpr e of
   Arr _ t -> t

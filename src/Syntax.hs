@@ -1,12 +1,21 @@
 {-# LANGUAGE GADTs, DataKinds, PolyKinds, StandaloneDeriving, TypeOperators, RankNTypes, FlexibleInstances, UndecidableInstances, GeneralizedNewtypeDeriving, InstanceSigs #-}
 
-module Syntax where
+module Syntax
+  ( module Syntax
+  , TType (..)
+  , Typey (..)
+  , TestEquality (..)
+  , Ident (Id)
+  , IdentKey (..)
+  , typeKey
+  , identKey
+  ) where
 
 import qualified Data.List as List
 import Data.Type.Equality
 import Data.Kind (Type)
 import Data.Function(on)
-import Data.Maybe ( isJust, fromMaybe ) 
+import Data.Maybe ( isJust, fromMaybe )
 
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -15,6 +24,8 @@ import Test.QuickCheck
 -- import (<>) as PP.(<>) from Text.PrettyPrint
 
 import Text.PrettyPrint
+
+import Ident
 
 
 ------------------------
@@ -34,53 +45,6 @@ deriving instance Show (Exists Ident)
 
 newtype AtmLabels = Atm Int deriving (Eq, Show, Ord, Enum)
 newtype FnLabels = Fn Int deriving (Eq, Show, Ord, Enum)
-
-data TType =
-  TBool
-  | TAtom
-  | TMemoFun
-  | TProduct TType TType
-  | TArrow [TType] TType
-  deriving (Show, Eq, Ord)
-
--- trick to implement dependent types using a singleton GADT, 
--- cf. https://homepages.inf.ed.ac.uk/slindley/papers/hasochism.pdf 
-data Typey :: TType -> Type where
-  𝔹 :: Typey 'TBool
-  𝔸 :: Typey 'TAtom
-  MemFn :: Typey 'TMemoFun
-  Prod :: Typey a -> Typey b -> Typey ('TProduct a b)
-  Arr :: Typey a -> Typey b -> Typey ('TArrow '[a] b)
-deriving instance Show (Typey a)
-deriving instance Eq (Typey a)
-
-
-instance TestEquality Typey where
-  testEquality :: Typey a -> Typey b -> Maybe (a :~: b)
-  testEquality 𝔹 𝔹 = Just Refl
-  testEquality 𝔸 𝔸 = Just Refl
-  testEquality MemFn MemFn = Just Refl
-  testEquality (Prod a b) (Prod c d) = do
-    Refl <- testEquality a c
-    Refl <- testEquality b d
-    return Refl
-  testEquality (Arr a b) (Arr c d) = do
-    Refl <- testEquality a c
-    Refl <- testEquality b d
-    return Refl
-  testEquality _ _ = Nothing
-
--- data TypedName :: Type -> TType -> Type where
---   TypedName :: a -> TypedName a b
-
-data Ident :: TType -> Type where
-  Id :: (String, Typey a) -> Ident a
--- data Ident :: TType -> Type where 
---   Id :: String -> Ident a
-
-instance Show (Ident a) where
-  show (Id (x, _)) = x
-deriving instance Eq (Ident a)
 
 data Expr :: TType -> Type where
   Atom :: AtmLabels -> Expr 'TAtom
@@ -107,13 +71,13 @@ instance Show (Expr a) where
     ppExpr (Bool b) = text $ show b
     ppExpr (If e1 e2 e3) = text "If" <+> parens (ppExpr e1) <+> text "then" <+> parens (ppExpr e2) <+> text "else" <+> parens (ppExpr e3)
     ppExpr (Pair e1 e2) = text "Pair" <+> parens (ppExpr e1 Text.PrettyPrint.<> text "," <+> ppExpr e2)
-    ppExpr (Match e (Id (x, _), Id (y, _)) e') = text "Match" <+> ppExpr e
+    ppExpr (Match e (x, y) e') = text "Match" <+> ppExpr e
         <+> text "with"
-        <+> parens (text x Text.PrettyPrint.<> text "," <+> text y) 
-        <+> text "->" 
+        <+> parens (ppIdent x Text.PrettyPrint.<> text "," <+> ppIdent y)
+        <+> text "->"
         <+> parens (ppExpr e')
-    ppExpr (Variable (Id (x, _))) = text x
-    ppExpr (Lambda (Id (x, _)) e) = parens (text "λ" Text.PrettyPrint.<> text x Text.PrettyPrint.<> text "." <+> ppExpr e)
+    ppExpr (Variable x) = ppIdent x
+    ppExpr (Lambda x e) = parens (text "λ" Text.PrettyPrint.<> ppIdent x Text.PrettyPrint.<> text "." <+> ppExpr e)
     ppExpr (Apply e1 e2) = ppExpr e1 <+> text "`Apply`" <+> parens (ppExpr e2)
     ppExpr (MemoBernoulli p) = text "MemoBernoulli" <+> text (show p)
     ppExpr (MemoApply e1 e2) = ppExpr e1 <+> text "`MemoApply`" <+> parens (ppExpr e2)
@@ -124,7 +88,11 @@ instance Show (Expr a) where
     ppExpr Flip = text "Flip"
 
     ppDefn :: forall b. Defn b -> Doc
-    ppDefn (Val (Id (x, _)) e) = text x <+> text ":=" <+> ppExpr e
+    ppDefn (Val x e) = ppIdent x <+> text ":=" <+> ppExpr e
+
+    ppIdent :: forall b. Ident b -> Doc
+    ppIdent (Id (x, _)) = text (sourceText x)
+    ppIdent (Gen (x, _)) = text "#" Text.PrettyPrint.<> text x
 
     
 -- Existential operands prevent stock Eq/Ord deriving on Expr. Retain every
@@ -134,28 +102,18 @@ data ExprKey
   | BoolKey Bool
   | IfKey ExprKey ExprKey ExprKey
   | PairKey ExprKey ExprKey
-  | MatchKey ExprKey (String, TType) (String, TType) ExprKey
-  | VariableKey (String, TType)
-  | LambdaKey (String, TType) ExprKey
+  | MatchKey ExprKey IdentKey IdentKey ExprKey
+  | VariableKey IdentKey
+  | LambdaKey IdentKey ExprKey
   | ApplyKey ExprKey ExprKey
   | MemoBernoulliKey Double
   | MemoApplyKey ExprKey ExprKey
   | EqKey ExprKey ExprKey
-  | LetKey (String, TType) ExprKey ExprKey
+  | LetKey IdentKey ExprKey ExprKey
   | SequenceKey ExprKey ExprKey
   | FreshKey
   | FlipKey
   deriving (Eq, Ord)
-
-typeKey :: Typey a -> TType
-typeKey 𝔹 = TBool
-typeKey 𝔸 = TAtom
-typeKey MemFn = TMemoFun
-typeKey (Prod a b) = TProduct (typeKey a) (typeKey b)
-typeKey (Arr a b) = TArrow [typeKey a] (typeKey b)
-
-identKey :: Ident a -> (String, TType)
-identKey (Id (name, t)) = (name, typeKey t)
 
 exprKey :: Expr a -> ExprKey
 exprKey (Atom a) = AtomKey a
@@ -303,7 +261,7 @@ instance Arbitrary (Exists Expr) where
             This this1 <- arbExpr ls (Just t1) (n `div` 2)
             This this2 <- arbExpr ls' t (n `div` 2)
             return $ This $ Let (Val (Id (s1, unsafeCoerce t1)) (unsafeCoerce this1)) (unsafeCoerce this2)
-        , do -- Sequence construct
+        , do
             This t1 <- elements baseTypes
             This this1 <- arbExpr ls (Just t1) (n `div` 2)
             This this2 <- arbExpr ls t (n `div` 2)

@@ -1,5 +1,5 @@
 name:                minimemo
-version:             0.1.0.0
+version:             0.2.0.0
 github:              "githubuser/minimemo"
 license:             BSD3
 
@@ -20,7 +20,7 @@ dependencies:
 - base >= 4.7
 - containers
 - unix
-- probability
+- probability >= 0.2.7
 - mtl
 - QuickCheck
 - quickcheck-with-counterexamples
@@ -40,6 +40,13 @@ ghc-options:
 
 library:
   source-dirs: src
+  exposed-modules:
+  - Environment
+  - Semantics
+  - Syntax
+  - Values
+  other-modules:
+  - Ident
 
 executables:
   minimemo-exe:

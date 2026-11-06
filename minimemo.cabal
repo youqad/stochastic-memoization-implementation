@@ -1,11 +1,11 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.35.1.
+-- This file has been generated from package.yaml by hpack version 0.39.6.
 --
 -- see: https://github.com/sol/hpack
 
 name:           minimemo
-version:        0.1.0.0
+version:        0.2.0.0
 description:    Please see the README on GitHub at <https://github.com/youqad/stochastic-memoization-implementation>
 homepage:       https://github.com/githubuser/minimemo#readme
 bug-reports:    https://github.com/githubuser/minimemo/issues
@@ -27,7 +27,7 @@ library
       Syntax
       Values
   other-modules:
-      Paths_minimemo
+      Ident
   hs-source-dirs:
       src
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
@@ -38,7 +38,7 @@ library
     , mtl
     , pretty
     , pretty-simple
-    , probability
+    , probability >=0.2.7
     , quickcheck-with-counterexamples
     , unix
   default-language: Haskell2010
@@ -58,7 +58,7 @@ executable minimemo-exe
     , mtl
     , pretty
     , pretty-simple
-    , probability
+    , probability >=0.2.7
     , quickcheck-with-counterexamples
     , unix
   default-language: Haskell2010
@@ -67,14 +67,15 @@ test-suite minimemo-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
-      ScopeSpec
-      RegressionSpec
-      SemanticsSpec
       AritySpec
+      RegressionSpec
+      ScopeSpec
+      SemanticsSpec
       Paths_minimemo
   hs-source-dirs:
       test
-  build-tool-depends: hspec-discover:hspec-discover
+  build-tool-depends:
+      hspec-discover:hspec-discover
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       QuickCheck
@@ -86,7 +87,7 @@ test-suite minimemo-test
     , mtl
     , pretty
     , pretty-simple
-    , probability
+    , probability >=0.2.7
     , quickcheck-with-counterexamples
     , should-not-typecheck
     , unix
