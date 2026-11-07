@@ -162,6 +162,8 @@ simplifySpec = describe "simplifying evaluator states" $ do
                   (MemoApply (Variable (Id ("m", MemFn))) (Variable (Id ("a", 𝔸))))
     jointLaw den e `shouldBe` [((False, False), 0.5), ((True, True), 0.5)]
     where
+      jointLaw :: Evaluator
+        -> Expr ('TProduct 'TBool 'TBool) -> [((Bool, Bool), Rational)]
       jointLaw sem e =
         let T ev = sem e initEnv
             values = fmap fst $ State.runStateT ev (initMem, S Map.empty)
@@ -259,6 +261,22 @@ observationSpec = describe "Returned observations" $ do
                 Lambda (Id ("argument", 𝔸))
                   (MemoApply (Variable (Id ("m", MemFn))) Fresh)
         Dist.equal (run sem correlated) (run sem independent) `shouldBe` False
+      it "product argument: shared vs fresh atoms" $ do
+        let h = Id ("h", Arr (Prod 𝔸 𝔸) 𝔹)
+            arg = Id ("argument", Prod 𝔸 𝔸)
+            x1 = Id ("x1", 𝔸)
+            x2 = Id ("x2", 𝔸)
+            body = Match (Variable arg) (x1, x2) (Variable x1 `Eq` Variable x2)
+            diagonal =
+              Let (Val h (Lambda arg body)) $
+                Let (Val (Id ("a", 𝔸)) Fresh) $
+                  Apply (Variable h) (Pair (Variable (Id ("a", 𝔸))) (Variable (Id ("a", 𝔸))))
+            offDiagonal =
+              Let (Val h (Lambda arg body)) $
+                Apply (Variable h) (Pair Fresh Fresh)
+        booleanLaw sem diagonal `shouldBe` [(True, 1)]
+        booleanLaw sem offDiagonal `shouldBe` [(False, 1)]
+        Dist.equal (run sem diagonal) (run sem offDiagonal) `shouldBe` False
 
 totalMass :: T a -> Rational
 totalMass (T ev) =

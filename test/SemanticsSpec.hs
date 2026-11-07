@@ -1,4 +1,4 @@
-{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DataKinds, GADTs #-}
 
 module SemanticsSpec (spec) where
 

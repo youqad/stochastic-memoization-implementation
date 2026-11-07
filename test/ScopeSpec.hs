@@ -21,6 +21,49 @@ scopeWitness inner =
        If (Let (Val y (Bool False)) (Bool True))
          (Variable x) (Bool False)
 
+nestedIfWitness :: String -> Expr 'TBool
+nestedIfWitness inner =
+  let x = Id ("x", 𝔹)
+      y = Id (inner, 𝔹)
+  in Let (Val x (Bool True)) $
+       If (If (Let (Val y (Bool False)) (Bool True))
+              (Variable x) (Bool True))
+          (Bool True) (Bool False)
+
+matchUnderIfWitness :: String -> Expr 'TBool
+matchUnderIfWitness inner =
+  let x = Id ("x", 𝔹)
+      y = Id (inner, 𝔹)
+      a = Id ("a", 𝔹)
+      b = Id ("b", 𝔹)
+  in Let (Val x (Bool True)) $
+       If (Match (Let (Val y (Bool False)) (Pair (Bool True) (Bool True)))
+                 (a, b) (Variable x))
+          (Bool True) (Bool False)
+
+nestedMatchWitness :: Expr 'TBool
+nestedMatchWitness =
+  let x = Id ("x", 𝔹)
+      a = Id ("a", 𝔹)
+      b = Id ("b", 𝔹)
+  in Let (Val x (Bool True)) $
+       Sequence
+         (Let (Val x (Bool False))
+           (Match (Pair (Bool False) (Bool True)) (a, b) (Bool True)))
+         (Variable x)
+
+shadowingMatchWitness :: Expr 'TBool
+shadowingMatchWitness =
+  let x = Id ("x", 𝔹)
+      y = Id ("y", 𝔹)
+      a = Id ("a", 𝔹)
+      b = Id ("b", 𝔹)
+  in Let (Val x (Bool True)) $
+       Sequence
+         (Match (Pair (Bool False) (Bool True)) (x, y)
+           (Match (Pair (Bool False) (Bool True)) (a, b) (Variable x)))
+         (Variable x)
+
 spec :: Spec
 spec = lexicalSpec
 
@@ -91,6 +134,69 @@ lexicalSpec = describe "Lexical scope" $ do
     booleanLaw bigStep e `shouldBe` [(True, 1)]
     booleanLaw den e `shouldBe` [(True, 1)]
     booleanLaw smallStepIterated e `shouldBe` [(True, 1)]
+  it "shadowing let in a match scrutinee" $ do
+    let x = Id ("x", 𝔹)
+        a = Id ("a", 𝔹)
+        b = Id ("b", 𝔹)
+        witness = Let (Val x (Bool True)) $
+                    Match (Let (Val x (Bool False)) (Pair (Bool True) (Bool True)))
+                          (a, b) (Variable x)
+    booleanLaw bigStep witness `shouldBe` [(True, 1)]
+    booleanLaw den witness `shouldBe` [(True, 1)]
+    booleanLaw smallStepIterated witness `shouldBe` [(True, 1)]
+  it "alpha-renamed match scrutinee" $ do
+    let x = Id ("x", 𝔹)
+        z = Id ("z", 𝔹)
+        a = Id ("a", 𝔹)
+        b = Id ("b", 𝔹)
+        control = Let (Val x (Bool True)) $
+                    Match (Let (Val z (Bool False)) (Pair (Bool True) (Bool True)))
+                          (a, b) (Variable x)
+    booleanLaw bigStep control `shouldBe` [(True, 1)]
+    booleanLaw den control `shouldBe` [(True, 1)]
+    booleanLaw smallStepIterated control `shouldBe` [(True, 1)]
+  it "shadowing let in a nested If guard" $ do
+    booleanLaw bigStep (nestedIfWitness "x") `shouldBe` [(True, 1)]
+    booleanLaw den (nestedIfWitness "x") `shouldBe` [(True, 1)]
+    booleanLaw smallStepIterated (nestedIfWitness "x") `shouldBe` [(True, 1)]
+  it "alpha-renamed nested If guard" $ do
+    booleanLaw bigStep (nestedIfWitness "z") `shouldBe` [(True, 1)]
+    booleanLaw den (nestedIfWitness "z") `shouldBe` [(True, 1)]
+    booleanLaw smallStepIterated (nestedIfWitness "z") `shouldBe` [(True, 1)]
+  it "shadowing let in a match scrutinee inside an If guard" $ do
+    booleanLaw bigStep (matchUnderIfWitness "x") `shouldBe` [(True, 1)]
+    booleanLaw den (matchUnderIfWitness "x") `shouldBe` [(True, 1)]
+    booleanLaw smallStepIterated (matchUnderIfWitness "x") `shouldBe` [(True, 1)]
+  it "alpha-renamed match scrutinee inside an If guard" $ do
+    booleanLaw bigStep (matchUnderIfWitness "z") `shouldBe` [(True, 1)]
+    booleanLaw den (matchUnderIfWitness "z") `shouldBe` [(True, 1)]
+    booleanLaw smallStepIterated (matchUnderIfWitness "z") `shouldBe` [(True, 1)]
+  it "match under a shadowing let, sequenced before the outer x" $ do
+    booleanLaw bigStep nestedMatchWitness `shouldBe` [(True, 1)]
+    booleanLaw den nestedMatchWitness `shouldBe` [(True, 1)]
+    booleanLaw smallStepIterated nestedMatchWitness `shouldBe` [(True, 1)]
+    finalStacks nestedMatchWitness `shouldSatisfy` allEmpty
+  it "nested match with pattern shadowing" $ do
+    booleanLaw bigStep shadowingMatchWitness `shouldBe` [(True, 1)]
+    booleanLaw den shadowingMatchWitness `shouldBe` [(True, 1)]
+    booleanLaw smallStepIterated shadowingMatchWitness `shouldBe` [(True, 1)]
+    finalStacks shadowingMatchWitness `shouldSatisfy` allEmpty
+  it "memo query in a shadowing match scrutinee" $ do
+    let x = Id ("x", 𝔹)
+        f = Id ("f", MemFn)
+        a = Id ("a", 𝔸)
+        p = Id ("p", 𝔹)
+        q = Id ("q", 𝔹)
+        query = MemoApply (Variable f) (Variable a)
+        e = Let (Val x (Bool True)) $
+              Let (Val f (MemoBernoulli 0.25)) $
+                Let (Val a Fresh) $
+                  Match (Let (Val x (Bool False)) (Pair query (Bool True)))
+                        (p, q)
+                        (If (Variable p) (Variable x) (Bool False))
+    booleanLaw bigStep e `shouldBe` [(False, 0.75), (True, 0.25)]
+    booleanLaw den e `shouldBe` [(False, 0.75), (True, 0.25)]
+    booleanLaw smallStepIterated e `shouldBe` [(False, 0.75), (True, 0.25)]
 
 smallStepPairSecond :: Expr ('TProduct 'TBool 'TBool) -> [(Bool, Rational)]
 smallStepPairSecond e =
@@ -98,6 +204,22 @@ smallStepPairSecond e =
       values = fmap fst $ State.runStateT ev (initMem, S Map.empty)
       Dist.Cons outcomes = Dist.norm values
   in map (\(PairVal _ (BoolVal b) _, p) -> (b, p)) outcomes
+
+finalStacks :: Expr 'TBool -> [[(EnvVal, EnvVal)]]
+finalStacks e =
+  let T ev = do
+        (_, s) <- State.runStateT (loop e) ([], emptyEnv, initEnv)
+        return s
+      loop e' = do
+        r <- smallStep e'
+        case r of
+          Left e'' -> loop e''
+          Right _ -> return ()
+      Dist.Cons outcomes = Dist.norm $ State.evalStateT ev (initMem, S Map.empty)
+  in [ envs | ((envs, _, _), _) <- outcomes ]
+
+allEmpty :: [[(EnvVal, EnvVal)]] -> Bool
+allEmpty stacks = not (null stacks) && all null stacks
 
 replace :: String -> String -> String -> String
 replace old new = go

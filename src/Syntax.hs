@@ -227,8 +227,16 @@ instance Arbitrary (Exists Expr) where
           , This . MemoBernoulli . round' 3 <$> choose (0, 1)]
           ++ [return $ This (Variable (Id (s', t'))) | (This (Id (s', t'))) <- listVariables]
     listOfPossibilitiesContext :: [Exists Ident] -> Maybe (Typey a) -> Int -> [Gen (Exists Expr)]
-    listOfPossibilitiesContext ls t n = 
-      let baseTypes = [This 𝔸, This 𝔹, This MemFn, This (Arr 𝔸 𝔸), This (Arr 𝔸 𝔹), This (Arr 𝔹 𝔸), This (Arr 𝔹 𝔹)] in
+    listOfPossibilitiesContext ls t n =
+      let baseTypes = [This 𝔸, This 𝔹, This MemFn, This (Arr 𝔸 𝔸), This (Arr 𝔸 𝔹), This (Arr 𝔹 𝔸), This (Arr 𝔹 𝔹)]
+          -- odd number of names in scope: reuse the first one of type ty, else a fresh x_k
+          -- (so binders that shadow an outer name of the same type mix with fresh ones)
+          pickShadowName :: Int -> Typey b -> String
+          pickShadowName k ty =
+            case [ s' | This (Id (s', t')) <- ls, isJust (testEquality t' ty) ] of
+              (s':_) | odd (List.length ls) -> s'
+              _ -> "x_" ++ show (List.length ls + k)
+      in
         [ do -- If construct
             This t1 <- case t of
               Nothing -> elements baseTypes
@@ -236,17 +244,34 @@ instance Arbitrary (Exists Expr) where
             This this0 <- arbExpr ls (Just 𝔹) (n `div` 2)
             This this1 <- arbExpr ls (Just t1) (n `div` 2)
             This this2 <- arbExpr ls (Just t1) (n `div` 2)
-            return $ This $ If (unsafeCoerce this0) this1 (unsafeCoerce this2)
+            let this0' :: Expr 'TBool
+                this0' = unsafeCoerce this0
+                s0 = pickShadowName 1 𝔹
+            guard' <- oneof
+              [ return this0'
+              , return (Let (Val (Id (s0, 𝔹)) (Bool False)) (If this0' (Bool True) (Bool False)))
+              ]
+            return $ This $ If guard' this1 (unsafeCoerce this2)
         , do -- Match construct
-            let s1 = "x_" ++ show (List.length ls + 1)
-            let s2 = "x_" ++ show (List.length ls + 2)
             This t1 <- elements baseTypes
             This t2 <- elements baseTypes
+            let s1 = pickShadowName 1 t1
+            let s2 = if s1 == "x_" ++ show (List.length ls + 1)
+                       then pickShadowName 2 t2
+                       else "x_" ++ show (List.length ls + 2)
             let ls' = This (Id (s1, t1)):This (Id (s2, t2)):ls
             This this1 <- arbExpr ls (Just t1) (n `div` 2)
             This this2 <- arbExpr ls (Just t2) (n `div` 2)
             This this3 <- arbExpr ls' t (n `div` 2)
-            return $ This $ Match (Pair this1 this2) (Id (s1, unsafeCoerce t1), Id (s2, unsafeCoerce t2)) (unsafeCoerce this3)
+            scrutinee <- oneof
+              [ return (Pair this1 this2)
+              , do
+                  This t3 <- elements baseTypes
+                  let s3 = pickShadowName 3 t3
+                  This bound <- arbExpr ls (Just t3) (n `div` 2)
+                  return $ Let (Val (Id (s3, unsafeCoerce t3)) (unsafeCoerce bound)) (Pair this1 this2)
+              ]
+            return $ This $ Match scrutinee (Id (s1, unsafeCoerce t1), Id (s2, unsafeCoerce t2)) (unsafeCoerce this3)
         , do -- Apply construct
             This t1 <- elements baseTypes
             This t2 <- elements baseTypes
@@ -255,8 +280,8 @@ instance Arbitrary (Exists Expr) where
             This this2 <- arbExpr ls (Just t1) (n `div` 2)
             return $ This $ Apply (unsafeCoerce this1) (unsafeCoerce this2)
         , do -- Let construct
-            let s1 = "x_" ++ show (List.length ls + 1)
             This t1 <- elements baseTypes
+            let s1 = pickShadowName 1 t1
             let ls' = This (Id (s1, t1)) : ls
             This this1 <- arbExpr ls (Just t1) (n `div` 2)
             This this2 <- arbExpr ls' t (n `div` 2)

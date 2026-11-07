@@ -12,6 +12,8 @@ den :: Expr a -> EnvVal -> T (Value a)
 
 To build the project, use `stack build`. To run the automatic tests, use `stack build --test` or `stack test`. The Main module can be run with `stack run minimemo-exe`.
 
+With Cabal, run `cabal test all` (tested with GHC 9.6.7 and 9.14.1; `stack.yaml` uses `lts-20.2`, i.e. GHC 9.2.5).
+
 The Main module is in `app/Main.hs`, and all the libraries (specifying syntax, semantics, values (where the monad and values are defined), environments (where the environment and the bigraph memo-table are written)) are in the folder `src`. 
 
 NB: when we say "complete" for `bigStep` and `smallStep`, we mean "completing" the bipartite graph: all the edges between left nodes (function labels) and right nodes (atom labels) that haven't been determined yet are chosen at random.

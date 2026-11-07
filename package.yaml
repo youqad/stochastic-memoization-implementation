@@ -1,6 +1,6 @@
 name:                minimemo
-version:             0.2.0.0
-github:              "githubuser/minimemo"
+version:             0.3.0.0
+github:              "youqad/stochastic-memoization-implementation"
 license:             BSD3
 
 extra-source-files:

@@ -5,10 +5,10 @@ cabal-version: 1.12
 -- see: https://github.com/sol/hpack
 
 name:           minimemo
-version:        0.2.0.0
+version:        0.3.0.0
 description:    Please see the README on GitHub at <https://github.com/youqad/stochastic-memoization-implementation>
-homepage:       https://github.com/githubuser/minimemo#readme
-bug-reports:    https://github.com/githubuser/minimemo/issues
+homepage:       https://github.com/youqad/stochastic-memoization-implementation#readme
+bug-reports:    https://github.com/youqad/stochastic-memoization-implementation/issues
 license:        BSD3
 license-file:   LICENSE
 build-type:     Simple
@@ -18,7 +18,7 @@ extra-source-files:
 
 source-repository head
   type: git
-  location: https://github.com/githubuser/minimemo
+  location: https://github.com/youqad/stochastic-memoization-implementation
 
 library
   exposed-modules:
